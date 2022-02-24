@@ -1,0 +1,63 @@
+// color.sf
+
+pipeline { 
+
+    raster 
+    { 
+        primitive: TRIANGLES
+        index_buffer_element_size: UINT16
+    },
+
+    blend 
+    { 
+        func: ADD
+        src: SRC_ALPHA
+        dst: ONE_MINUS_SRC_ALPHA
+    },
+
+    depth 
+    {
+        func: LESS 
+    }, 
+
+    shader { 
+    
+        vertex { 
+
+            attributes { 
+                POSITION : a_position
+                COLOR: a_color
+            }, 
+
+            uniforms {
+                mat4 u_mvp;
+            },
+
+            out {
+                vec3 vposition;
+                vec4 vcolor;
+            },
+
+            code { 
+                void main() {
+                    gl_Position = u_mvp * vec4(a_position, 1.0);
+                    vposition = a_position;
+                    vcolor = a_color;
+                }
+            }
+        },
+
+        fragment { 
+            
+            out {
+                vec4 frag_color;            
+            },
+
+            code {
+                void main() {
+                    frag_color = vcolor;
+                }
+            }
+        } 
+    } 
+} 
