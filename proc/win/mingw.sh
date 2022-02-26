@@ -8,7 +8,7 @@ proj_name=App
 proj_root_dir=$(pwd)/../
 
 flags=(
-	-std=gnu99 -w
+	-std=gnu99 -w -pthread
 )
 
 # Include directories
@@ -18,7 +18,8 @@ inc=(
 
 # Source files
 src=(
-	../source/main.c
+	../source/main.c 
+    ../third_party/include/flecs/flecs.c
 )
 
 libs=(
@@ -29,6 +30,7 @@ libs=(
 	-lgdi32 
     -lWinmm
 	-lAdvapi32
+    -lws2_32
 )
 
 # Build
