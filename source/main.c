@@ -2599,7 +2599,7 @@ GS_API_DECL void bsf_room_load(struct bsf_t* bsf, uint32_t cell)
 
     // Get new room to load
     room = gs_slot_array_iter_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
-    room->movement_type = BSF_MOVEMENT_FREE_RANGE; 
+    room->movement_type = BSF_MOVEMENT_RAIL; 
 
     // Load a room template
     gs_snprintfc(RT_FILE, 256, "%s/room_templates/room.rt", bsf->assets.asset_dir);
