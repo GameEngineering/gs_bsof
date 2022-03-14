@@ -4,7 +4,7 @@ pipeline {
 
     raster 
     { 
-        primitive: TRIANGLES
+        primitive: LINES
         index_buffer_element_size: UINT32
     },
 

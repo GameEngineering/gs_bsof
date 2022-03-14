@@ -2,7 +2,7 @@ pipeline {
 
     raster 
     { 
-        primitive: TRIANGLES
+        primitive: LINES
         index_buffer_element_size: UINT32
     },
 
@@ -44,6 +44,7 @@ pipeline {
 
             uniforms {
                 sampler2D u_tex;
+                vec3 u_color;
             }, 
             
             out {
@@ -52,7 +53,7 @@ pipeline {
 
             code {
                 void main() {
-                    frag_color = texture(u_tex, uv);
+                    frag_color = vec4(u_color, 1.0); //texture(u_tex, uv);
                 }
             }
         } 

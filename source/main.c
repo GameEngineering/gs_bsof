@@ -71,6 +71,16 @@
         Shot Speed: How quickly the character's tears travel.
         Luck:       Affects a variety of chance-based effects.
 
+    TODO:   
+        - Physics meshes for poly collisions
+        - Behaviors for 3 different basic enemy types
+        - Boss
+        - UI
+        - Various obstacles/props
+        - Construct more room templates
+        - Make it look nice...
+        - Room navigation
+
 =================================================================*/
 
 
@@ -88,6 +98,9 @@
 
 #define GS_GFXT_IMPL
 #include <gs/util/gs_gfxt.h>
+
+#define GS_AI_IMPL
+#include <gs/util/gs_ai.h>
 
 #include "flecs/flecs.h" 
 
@@ -118,7 +131,8 @@ typedef struct
 
 GS_API_DECL void bsf_camera_init(struct bsf_t* bsf, bsf_camera_t* camera);
 GS_API_DECL void bsf_camera_update(struct bsf_t* bsf, bsf_camera_t* camera);
-GS_API_DECL void bsf_camera_shake(struct bsf_t* bsf, bsf_camera_t* camera, float amt);
+GS_API_DECL void bsf_camera_shake(struct bsf_t* bsf, bsf_camera_t* camera, float amt); 
+GS_API_DECL void bsf_dbg_reload_ss(struct bsf_t* bsf);
 
 typedef enum
 {
@@ -126,7 +140,8 @@ typedef enum
     BSF_SHAPE_SPHERE, 
     BSF_SHAPE_CONE,
     BSF_SHAPE_CROSS,
-    BSF_SHAPE_CYLINDER
+    BSF_SHAPE_CYLINDER,
+    BSF_SHAPE_ROOM
 } bsf_shape_type;
 
 typedef gs_gfxt_material_t bsf_material_instance_t; 
@@ -159,11 +174,11 @@ typedef struct
 
 typedef struct
 {
-	uint32_t hndl;		            // Handle to a renderable in bsf graphics scene 
-} bsf_component_renderable_t; 
+	uint32_t hndl;		            // Handle to a renderable in bsf graphics scene
+} bsf_component_renderable_t;
 
 GS_API_DECL void bsf_component_renderable_dtor(ecs_world_t* world, ecs_entity_t comp, const ecs_entity_t* ent, void* ptr, size_t sz, int32_t count, void* ctx);
-GS_API_DECL void bsf_renderable_system(ecs_iter_t* it); 
+GS_API_DECL void bsf_renderable_system(ecs_iter_t* it);
 
 typedef struct
 {
@@ -173,7 +188,7 @@ typedef struct
     gs_color_t color;
 } bsf_component_renderable_immediate_t;
 
-GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it); 
+GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it);
 
 enum {
     BSF_COLLIDER_AABB = 0x00,
@@ -270,13 +285,39 @@ typedef struct
 } bsf_component_explosion_t;
 
 GS_API_DECL ecs_entity_t bsf_explosion_create(struct bsf_t* bsf, ecs_world_t* world, gs_vqs* xform, bsf_owner_type owner);
-GS_API_DECL void bsf_explosion_system(ecs_iter_t* it);
+GS_API_DECL void bsf_explosion_system(ecs_iter_t* it); 
+
+typedef struct
+{
+    int16_t firing;
+    float time;
+} bsf_component_gun_t;
+
+typedef struct
+{
+    gs_ai_bt_t bt;
+    gs_vec3 target;
+    float wait;
+} bsf_component_ai_t; 
+
+typedef struct
+{
+    bsf_component_gun_t* gc;
+    bsf_component_transform_t* tc;
+    bsf_component_physics_t* pc;
+    bsf_component_health_t* hc;
+    bsf_component_transform_t* ptc; // Player transform component
+    bsf_component_ai_t* ac;
+    ecs_world_t* world;
+    ecs_entity_t mob;
+} bsf_ai_data_t;
 
 typedef enum 
 {
     BSF_MOB_BOX = 0x00,
     BSF_MOB_SPHERE, 
-    BSF_MOB_CONE
+    BSF_MOB_CONE,
+    BSF_MOB_BANDIT
 } bsf_mob_type;
 
 typedef struct 
@@ -322,9 +363,9 @@ ECS_COMPONENT_DECLARE(bsf_component_health_t);
 ECS_COMPONENT_DECLARE(bsf_component_item_t);
 ECS_COMPONENT_DECLARE(bsf_component_camera_track_t);
 ECS_COMPONENT_DECLARE(bsf_component_barrel_roll_t); 
-ECS_COMPONENT_DECLARE(bsf_component_explosion_t);
+ECS_COMPONENT_DECLARE(bsf_component_explosion_t); 
 ECS_COMPONENT_DECLARE(bsf_component_inventory_t);
-
+ECS_COMPONENT_DECLARE(bsf_component_ai_t);
 
 //=== BSF Entities ===// 
 
@@ -356,12 +397,6 @@ enum
     BSF_MOVEMENT_RAIL
 };
 
-typedef struct
-{
-    int16_t firing;
-    float time;
-} bsf_component_gun_t;
-
 GS_API_DECL void bsf_player_init(struct bsf_t* bsf);
 GS_API_DECL void bsf_player_system(ecs_iter_t* iter);
 GS_API_DECL void bsf_player_damage(struct bsf_t* bsf, ecs_world_t* world, float damage); 
@@ -382,7 +417,8 @@ typedef enum {
     BSF_STATE_GAME_OVER,        // Game over screen
     BSF_STATE_EDITOR_START,     // Editor init
     BSF_STATE_EDITOR,           // Editor screen
-    BSF_STATE_QUIT              // Quit the game
+    BSF_STATE_QUIT,             // Quit the game
+    BSF_STATE_TEST              // Test room
 } bsf_state; 
 
 //=== BSF Menus ===//
@@ -401,11 +437,15 @@ GS_API_DECL void bsf_game_start(struct bsf_t* bsf);
 GS_API_DECL void bsf_game_end(struct bsf_t* bsf);
 GS_API_DECL void bsf_game_update(struct bsf_t* bsf);
 
+//=== BSF Test ===//
+
+GS_API_DECL void bsf_test(struct bsf_t* bsf);
+
 //=== BSF Room ===// 
 
-#define BSF_ROOM_WIDTH  30.f
-#define BSF_ROOM_HEIGHT 50.f
-#define BSF_ROOM_DEPTH  30.f
+#define BSF_ROOM_WIDTH  100.f
+#define BSF_ROOM_HEIGHT 100.f
+#define BSF_ROOM_DEPTH  100.f
 
 typedef enum {
     BSF_ROOM_DEFAULT = 0x00,
@@ -456,6 +496,8 @@ typedef struct {
     gs_hash_table(uint64_t, gs_gfxt_texture_t)    textures;
     gs_hash_table(uint64_t, gs_gfxt_material_t)   materials;
     gs_hash_table(uint64_t, gs_gfxt_mesh_t)       meshes;
+    gs_hash_table(uint64_t, gs_asset_font_t)      fonts;
+    gs_hash_table(uint64_t, gs_gui_style_sheet_t) style_sheets;
 } bsf_assets_t;
 
 GS_API_DECL void bsf_assets_init(struct bsf_t* bsf, bsf_assets_t* assets);
@@ -510,16 +552,18 @@ void bsf_init()
 
     // Initialize all asset data
     bsf_assets_init(bsf, &bsf->assets); 
-
-    gs_hash_table(uint64_t, float) table = NULL;
-    gs_hash_table_reserve(table, uint64_t, float, 81920);
 }
 
 void bsf_update()
 {
     bsf_t* bsf = gs_user_data(bsf_t); 
 
-    gs_gui_begin(&bsf->gs.gui);
+    gs_gui_begin(&bsf->gs.gui, gs_platform_framebuffer_sizev(gs_platform_main_window())); 
+
+    if (gs_platform_key_pressed(GS_KEYCODE_P))
+    {
+        bsf_dbg_reload_ss(bsf);
+    }
 
     switch (bsf->state)
     {
@@ -572,6 +616,11 @@ void bsf_update()
             gs_platform_lock_mouse(gs_platform_main_window(), false);
             gs_quit();
         } break;
+
+        case BSF_STATE_TEST:
+        {
+            bsf_test(bsf);
+        } break;
     } 
 
     gs_gui_end(&bsf->gs.gui);
@@ -593,6 +642,7 @@ gs_app_desc_t gs_main(int32_t argc, char** argv)
         .user_data = gs_malloc_init(bsf_t),
 		.window_width = 1200,
 		.window_height = 700,
+        .window_title = "Binding of Star Fox",
 		.init = bsf_init,
 		.update = bsf_update,
         .shutdown = bsf_shutdown
@@ -639,21 +689,36 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         }));
     }
 
-    struct {const char* key; const char* path;} textures[] = {
-        {.key = "tex.slave", .path = "textures/slave.png"}, 
-        {.key = "tex.arwing", .path = "textures/arwing.png"}, 
+    gs_graphics_texture_desc_t desc = (gs_graphics_texture_desc_t) {
+        .format = GS_GRAPHICS_TEXTURE_FORMAT_RGBA8,
+        .min_filter = GS_GRAPHICS_TEXTURE_FILTER_LINEAR,
+        .mag_filter = GS_GRAPHICS_TEXTURE_FILTER_LINEAR,
+        .wrap_s = GS_GRAPHICS_TEXTURE_WRAP_CLAMP_TO_EDGE,
+        .wrap_t = GS_GRAPHICS_TEXTURE_WRAP_CLAMP_TO_EDGE
+    };
+
+    struct {const char* key; const char* path; gs_graphics_texture_desc_t desc;} textures[] = {
+        {.key = "tex.slave", .path = "textures/slave.png", .desc = desc}, 
+        {.key = "tex.arwing", .path = "textures/arwing.png", .desc = desc}, 
+        {.key = "tex.vignette", .path = "textures/vignette.png", .desc = desc}, 
+        {.key = "tex.title_bg", .path = "textures/title_bg.png", .desc = (gs_graphics_texture_desc_t){
+            .format = GS_GRAPHICS_TEXTURE_FORMAT_RGBA8,
+            .min_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST,
+            .mag_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST
+        }}, 
         {NULL}
     };
 
     for (uint32_t i = 0; textures[i].key; ++i)
     { 
         gs_snprintfc(TMP, 256, "%s/%s", assets->asset_dir, textures[i].path);
-        gs_hash_table_insert(assets->textures, gs_hash_str64(textures[i].key), gs_gfxt_texture_load_from_file(TMP, NULL, false, false));
+        gs_hash_table_insert(assets->textures, gs_hash_str64(textures[i].key), gs_gfxt_texture_load_from_file(TMP, &textures[i].desc, false, false));
     }
 
     struct {const char* key; const char* pip;} materials[] = {
         {.key = "mat.simple", .pip = "pip.simple"},
         {.key = "mat.color", .pip = "pip.color"},
+        {.key = "mat.hit", .pip = "pip.simple"},
         {.key = "mat.gsi", .pip = "pip.gsi"},
         {NULL}
     };
@@ -668,7 +733,7 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         {.key = "mat.ship_arwing", .mat = "mat.simple"},
         {.key = "mat.laser_player", .mat = "mat.color"},
         {NULL}
-    };
+    }; 
 
     for (uint32_t i = 0; material_instances[i].key; ++i)
     {
@@ -676,6 +741,46 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         gs_gfxt_material_t inst = gs_gfxt_material_deep_copy(mat);
         gs_hash_table_insert(assets->materials, gs_hash_str64(material_instances[i].key), inst);
     } 
+    
+    struct {const char* key; const char* path; int32_t pt;} fonts[] = {
+        {.key = "font.arwing_h0", .path = "fonts/arwing.ttf", .pt = 90},
+        {.key = "font.arwing_h1", .path = "fonts/arwing.ttf", .pt = 32},
+        {.key = "font.arwing_h2", .path = "fonts/arwing.ttf", .pt = 24},
+        {.key = "font.arwing_p", .path = "fonts/arwing.ttf", .pt = 16},
+        {.key = "font.upheaval_h0", .path = "fonts/upheaval.ttf", .pt = 48},
+        {.key = "font.upheaval_h1", .path = "fonts/upheaval.ttf", .pt = 32},
+        {.key = "font.upheaval_h2", .path = "fonts/upheaval.ttf", .pt = 24},
+        {.key = "font.upheaval_p", .path = "fonts/upheaval.ttf", .pt = 16},
+        {NULL}
+    }; 
+
+    for (uint32_t i = 0; fonts[i].key; ++i) 
+    {
+        gs_snprintfc(TMP, 256, "%s/%s", assets->asset_dir, fonts[i].path);
+        gs_asset_font_t* font = gs_malloc_init(gs_asset_font_t); 
+        gs_asset_font_load_from_file(TMP, font, fonts[i].pt);
+        gs_hash_table_insert(bsf->gs.gui.font_stash, gs_hash_str64(fonts[i].key), font);
+    } 
+
+    struct {const char* key; const char* path;} style_sheets[] = {
+        {.key = "ss.title", .path = "style_sheets/bsf_title.ss"},
+        {NULL}
+    }; 
+
+    for (uint32_t i = 0; style_sheets[i].key; ++i)
+    {
+        gs_snprintfc(TMP, 256, "%s/%s", assets->asset_dir, style_sheets[i].path);
+        gs_gui_style_sheet_t ss = gs_gui_style_sheet_load_from_file(&bsf->gs.gui, TMP);
+        gs_hash_table_insert(assets->style_sheets, gs_hash_str64(style_sheets[i].key), ss);
+    }
+}
+
+GS_API_DECL void bsf_dbg_reload_ss(struct bsf_t* bsf)
+{
+    gs_gui_style_sheet_t* ss = gs_hash_table_getp(bsf->assets.style_sheets, gs_hash_str64("ss.title"));
+    gs_gui_style_sheet_destroy(&bsf->gs.gui, ss);
+    gs_snprintfc(TMP, 256, "%s/%s", bsf->assets.asset_dir, "style_sheets/bsf_title.ss");
+    *ss = gs_gui_style_sheet_load_from_file(&bsf->gs.gui, TMP); 
 }
 
 //=== BSF Graphics ===//
@@ -701,7 +806,7 @@ GS_API_DECL void bsf_graphics_render(struct bsf_t* bsf)
 	gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
 
     // Render pass
-    gs_graphics_begin_render_pass(cb, (gs_renderpass){0}); 
+    gs_graphics_renderpass_begin(cb, (gs_renderpass){0}); 
     { 
         gs_graphics_clear_desc_t clear = {.actions = &(gs_graphics_clear_action_t){.color = {0.05f, 0.05, 0.05, 1.f}}}; 
         gs_graphics_clear(cb, &clear);
@@ -736,15 +841,15 @@ GS_API_DECL void bsf_graphics_render(struct bsf_t* bsf)
         }
 
         // Render all gsi
-        gsi_render_pass_submit_ex(gsi, cb, NULL);
+        gsi_renderpass_submit_ex(gsi, cb, NULL);
 
         // Render all gui
         gs_gui_render(gui, cb);
     } 
-    gs_graphics_end_render_pass(cb);
+    gs_graphics_renderpass_end(cb);
 
 	// Submit command buffer for GPU
-	gs_graphics_submit_command_buffer(cb);
+	gs_graphics_command_buffer_submit(cb);
 }
 
 //=== BSF Entities ===// 
@@ -784,6 +889,7 @@ GS_API_DECL void bsf_entities_init(struct bsf_t* bsf)
     ECS_REGISTER_COMP(bsf_component_barrel_roll_t);
     ECS_REGISTER_COMP(bsf_component_explosion_t);
     ECS_REGISTER_COMP(bsf_component_inventory_t);
+    ECS_REGISTER_COMP(bsf_component_ai_t);
 
     // Register all systems 
 
@@ -834,12 +940,13 @@ GS_API_DECL void bsf_entities_init(struct bsf_t* bsf)
         bsf->entities.world, 
         bsf_mob_system,
         EcsOnUpdate,
-        bsf_component_renderable_immediate_t, 
+        bsf_component_renderable_t, 
         bsf_component_transform_t,
         bsf_component_physics_t, 
         bsf_component_health_t, 
         bsf_component_mob_t,
-        bsf_component_gun_t
+        bsf_component_gun_t,
+        bsf_component_ai_t
     ); 
 
     ECS_SYSTEM(
@@ -955,7 +1062,7 @@ GS_API_DECL ecs_entity_t bsf_explosion_create(struct bsf_t* bsf, ecs_world_t* wo
         }
     }); 
 
-    bsf_camera_shake(bsf, &bsf->scene.camera, 0.5f);
+    bsf_camera_shake(bsf, &bsf->scene.camera, 0.3f);
 
     ecs_set(world, b, bsf_component_timer_t, {.max = 1.f}); 
     ecs_set(world, b, bsf_component_explosion_t, {.owner = owner});
@@ -1077,27 +1184,6 @@ GS_API_DECL void bsf_physics_debug_draw_system(ecs_iter_t* it)
         }
         gsi_pop_matrix(gsi);
     }
-
-    // Draw ground plane (need triangle mesh for this to be generated for world)
-    float sz = BSF_ROOM_DEPTH;
-    float sx = BSF_ROOM_WIDTH;
-    float sy = BSF_ROOM_HEIGHT;
-    for (float r = -sz; r < sz; r += 1.f)
-    {
-        // Draw row
-        gs_vec3 s = gs_v3(-sx, 0.f, r);
-        gs_vec3 e = gs_v3(sx, 0.f, r);
-        gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 10));
-
-        for (float c = -sx; c < sx; c += 1.f)
-        {
-            // Draw columns
-            s = gs_v3(c, 0.f, -sz);
-            e = gs_v3(c, 0.f, sz);
-			gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 10));
-        }
-    }
-    gsi_box(gsi, 0.f, sy / 2.f, 0.f, sy + 1.f, sy / 2.f, sy + 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
 } 
 
 GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
@@ -1113,6 +1199,8 @@ GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
     gsi_camera3D(gsi, (uint32_t)fbs.x, (uint32_t)fbs.y);
     for (uint32_t i = 0; i < it->count; ++i)
     { 
+        if (rc[i].shape == BSF_SHAPE_ROOM) continue;
+                
         rc[i].model = gs_vqs_to_mat4(&tc[i].xform); 
         const gs_color_t* col = &rc[i].color;
         gs_gfxt_pipeline_t* pip = gs_gfxt_material_get_pipeline(rc[i].material);
@@ -1165,35 +1253,89 @@ GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
         gs_gfxt_material_set_uniform(rc[i].material, "u_mvp", &mvp);
         gs_gfxt_material_bind(&gsi->commands, rc[i].material);
         gs_gfxt_material_bind_uniforms(&gsi->commands, rc[i].material);
-        gsi_flush(gsi);
-    }
+        gsi_flush(gsi); 
+    } 
 
-    /*
-    // Draw ground plane (need triangle mesh for this to be generated for world)
-    float sz = 25.f;
-    for (float r = -sz; r < sz; r += 1.f)
+    // World
+
+    gsi_defaults(gsi);
+    gsi_blend_enabled(gsi, true);
+    gsi_depth_enabled(gsi, true);
+    gsi_camera(gsi, &bsf->scene.camera, (uint32_t)fbs.x, (uint32_t)fbs.y);
+    bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    switch (room->movement_type)
     {
-        // Draw row
-        gs_vec3 s = gs_v3(-sz, 0.f, r);
-        gs_vec3 e = gs_v3(sz, 0.f, r);
-        gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 10));
-
-        for (float c = -sz; c < sz; c += 1.f)
+        case BSF_MOVEMENT_FREE_RANGE:
         {
-            // Draw columns
-            s = gs_v3(c, 0.f, -sz);
-            e = gs_v3(c, 0.f, sz);
-			gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 10));
-        }
+            const float sz = 2000;
+            const float sx = 2000;
+            const float sy = 300; 
+            const float step = 20.f;
+            for (float r = -sz; r < sz; r += step)
+            {
+                // Draw row
+                gs_vec3 s = gs_v3(-sx, 0.f, r);
+                gs_vec3 e = gs_v3(sx, 0.f, r);
+                gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 40)); 
+
+                for (float c = -sx; c < sx; c += step)
+                {
+                    // Draw columns
+                    s = gs_v3(c, 0.f, -sz);
+                    e = gs_v3(c, 0.f, sz);
+                    gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 40));
+                }
+            }
+            gsi_box(gsi, 0.f, BSF_ROOM_HEIGHT / 2.f + 0.15f, 0.f, BSF_ROOM_WIDTH, BSF_ROOM_HEIGHT / 2.f, BSF_ROOM_DEPTH, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+        } break;
+
+        case BSF_MOVEMENT_RAIL:
+        {
+            const float sz = 150;
+            const float sx = 500;
+            const float sy = 100; 
+            const float step = 10.f;
+            const float zoff = fmod(t * 0.02f, step);
+            for (float r = -sz; r <= step; r += step)
+            {
+                // Draw row
+                gs_vec3 s = gs_v3(-sx, 0.f, r + zoff);
+                gs_vec3 e = gs_v3(sx, 0.f, r + zoff);
+                gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 30));
+
+                for (float c = -sx; c < sx; c += step)
+                {
+                    // Draw columns
+                    s = gs_v3(c, 0.f, -sz + zoff);
+                    e = gs_v3(c, 0.f, sz + zoff);
+                    gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 30));
+                }
+            }
+            gs_vec3 kb = {25.f, 25.f, 50.f};
+            gsi_box(gsi, 0.f, kb.y / 2.f, 0.f, kb.x + 1.f, kb.y / 2.f, kb.z + 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+
+            for (float r = -sz; r <= step; r += step)
+            {
+                // Draw row
+                gs_vec3 s = gs_v3(-sx, 0.f, r + zoff);
+                gs_vec3 e = gs_v3(sx, 0.f, r + zoff);
+
+                for (float c = -sx; c < sx; c += step)
+                {
+                    // Draw columns
+                    s = gs_v3(c, 0.f, -sz + zoff);
+                    e = gs_v3(c, 0.f, sz + zoff);
+                    float y = gs_perlin2(sx, sz);
+                    gsi_box(gsi, c, y * 0.5f, sz + zoff, 1.f, y * 0.5f, 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+                }
+            }
+
+            // Do random boxes based on seed value (for obstacles) 
+            gsi_box(gsi, kb.x, kb.y / 2.f, -sz + kb.z, 1.f, kb.y / 2.f, 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+
+        } break;
     }
-    gs_gfxt_pipeline_t* pip = gs_gfxt_material_get_pipeline(rc->material);
-    gsi_box(gsi, 0.f, sz / 2.f, 0.f, sz + 1.f, sz / 2.f, sz + 1.f, 0, 255, 0, 255, pip->desc.raster.primitive);
-    gs_mat4 vp = gs_camera_get_view_projection(&bsf->scene.camera, fbs.x, fbs.y);
-    gs_gfxt_material_set_uniform(rc->material, "u_mvp", &vp);
-    gs_gfxt_material_bind(&gsi->commands, rc->material);
-    gs_gfxt_material_bind_uniforms(&gsi->commands, rc->material);
-    gsi_flush(gsi);
-    */
+
 }
 
 GS_API_DECL void bsf_renderable_system(ecs_iter_t* it)
@@ -1221,12 +1363,13 @@ GS_API_DECL void bsf_camera_init(struct bsf_t* bsf, bsf_camera_t* camera)
     camera->cam = gs_camera_perspective();
     camera->shake_time = 0.f;
     camera->pitch = 0.f;
+    camera->cam.fov = 60.f;
 }
 
 GS_API_DECL void bsf_camera_update(struct bsf_t* bsf, bsf_camera_t* camera) 
 {
     const float dt = gs_platform_delta_time() * bsf->run.time_scale;
-    const bsf_component_camera_track_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_camera_track_t);
+    bsf_component_camera_track_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_camera_track_t);
 	gs_camera_t* c = &camera->cam; 
     const bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
     gs_vec3 so = gs_v3s(0.f);
@@ -1256,26 +1399,27 @@ GS_API_DECL void bsf_camera_update(struct bsf_t* bsf, bsf_camera_t* camera)
             gs_vec3 np = gs_vec3_add(c->transform.position, v); 
 
             const float plerp = 0.025f;
-            const float zlerp = 0.1f;
+            const float zlerp = 0.05f;
             const float rlerp = 0.05f;
 
             c->transform.rotation = gs_quat_slerp(c->transform.rotation, ptc->xform.rotation, rlerp);
 
             // Lerp position to new position
             c->transform.position = gs_v3(
-                gs_interp_linear(c->transform.position.x, np.x, plerp),
-                gs_interp_linear(c->transform.position.y, np.y, plerp),
-                gs_interp_linear(c->transform.position.z, np.z, plerp)
+                gs_interp_linear(c->transform.position.x, np.x, zlerp),
+                gs_interp_linear(c->transform.position.y, np.y, zlerp),
+                gs_interp_linear(c->transform.position.z, np.z, zlerp)
             ); 
-            c->transform.position = gs_vec3_add(c->transform.position, gs_quat_rotate(c->transform.rotation, so));
 
         } break;
 
         case BSF_MOVEMENT_RAIL:
-        {
+        { 
+            bsf_component_transform_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_transform_t);
+
             // Update camera position to follow target
             gs_vec3 backward = gs_quat_rotate(ptc->xform.rotation, GS_ZAXIS);
-            gs_vec3 target = gs_vec3_add(ptc->xform.position, gs_v3(0.f, 0.f, 1.f));
+            gs_vec3 target = gs_vec3_add(ptc->xform.position, gs_v3(0.f, 0.f, 3.f));
             gs_vec3 v = gs_vec3_sub(target, c->transform.position); 
 
             gs_vec3 np = gs_vec3_add(c->transform.position, v);
@@ -1290,14 +1434,17 @@ GS_API_DECL void bsf_camera_update(struct bsf_t* bsf, bsf_camera_t* camera)
                 gs_interp_linear(c->transform.position.z, np.z, plerp)
             ); 
             
-            c->transform.rotation = gs_quat_angle_axis(gs_deg2rad(target.x), GS_ZAXIS);
+            c->transform.rotation = gs_quat_angle_axis(gs_deg2rad(target.x * 1.4f), GS_ZAXIS);
         } break;
     } 
+
+    // Camera shake
+    c->transform.position = gs_vec3_add(c->transform.position, gs_quat_rotate(c->transform.rotation, so));
 }
 
 GS_API_DECL void bsf_camera_shake(struct bsf_t* bsf, bsf_camera_t* camera, float amt)
 {
-    camera->shake_time += amt;
+    camera->shake_time = gs_clamp(camera->shake_time + amt, 0.f, 1.f);
 }
 
 //=== BSF Item ===//
@@ -1424,31 +1571,46 @@ GS_API_DECL void bsf_item_system(ecs_iter_t* it)
 
 GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mob_type type)
 {
-    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
+    // gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi")); 
+    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
+    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.bandit"));
+    
 
     ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
- 
+
     switch (type)
     {
-        case BSF_MOB_BOX: 
-        {
-            ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
-                .shape = BSF_SHAPE_BOX,
-                .model = gs_vqs_to_mat4(xform),
-				.material = mat,
-                .color = GS_COLOR_WHITE
-            });
+        case BSF_MOB_BANDIT: 
+        { 
+            xform->scale = gs_v3s(0.3f);
+            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
+
+            ecs_set(bsf->entities.world, e, bsf_component_renderable_t, { 
+                .hndl = bsf_graphics_scene_renderable_create(&bsf->scene, &(bsf_renderable_desc_t){
+                    .material = mat,
+                    .mesh = mesh,
+                    .model = gs_vqs_to_mat4(xform)
+                })
+            }); 
 
 	        ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
 				.collider = {
 					.type = BSF_COLLIDER_AABB,
-					.xform = gs_vqs_default(),
+					.xform = (gs_vqs){
+                        .translation = gs_v3(0.f, 2.5f, 0.f),
+                        .rotation = gs_quat_default(),
+                        .scale = gs_v3(5.f, 5.f, 5.f)
+                    },
 					.shape.aabb = (gs_aabb_t) {
 						.min = gs_v3s(-0.5f),
 						.max = gs_v3s(0.5f)
 					}
 				}
             });
+
+            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
+                .target = xform->translation
+            }); 
 
         } break;
 
@@ -1471,6 +1633,12 @@ GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mo
 					}
 				}
             });
+
+            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
+                .target = xform->translation
+            }); 
+
+            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
         } break;
 
         case BSF_MOB_CONE:
@@ -1493,16 +1661,253 @@ GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mo
 					}
 				}
             });
+
+            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
+                .target = xform->translation
+            }); 
+
+            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
         } break;
     }
  
     ecs_set(bsf->entities.world, e, bsf_component_health_t, {.health = 1.f});
-    ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
-    ecs_set(bsf->entities.world, e, bsf_component_mob_t, {0});
+    ecs_set(bsf->entities.world, e, bsf_component_mob_t, {.type = type});
     ecs_set(bsf->entities.world, e, bsf_component_gun_t, {0}); 
 
     return e;
 } 
+
+void bsf_mob_destroy(ecs_world_t* world, ecs_entity_t mob)
+{
+    bsf_t* bsf = gs_user_data(bsf_t);
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Have to iterate over the dynamic array of mobs and remove... 
+    for (uint32_t i = 0; i < gs_dyn_array_size(room->mobs); ++i)
+    {
+        if (mob == room->mobs[i])
+        { 
+            room->mobs[i] = gs_dyn_array_back(room->mobs);
+            gs_dyn_array_pop(room->mobs);
+            break;
+        }
+    }
+
+    ecs_delete(world, mob);
+}
+
+void bsf_ai_task_find_rand_target_location(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{ 
+	bsf_t* bsf = gs_user_data(bsf_t);
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+    float dist = gs_vec3_dist(data->tc->xform.translation, data->ac->target);
+    if (dist < 1.f)
+    {
+		gs_vec3 target = gs_v3(
+            gs_rand_gen_range(&bsf->run.rand, -10.f, 10.f),
+            gs_rand_gen_range(&bsf->run.rand, 1.f, 10.f),
+            gs_rand_gen_range(&bsf->run.rand, -4.f, 10.f)
+        );
+        data->ac->target = target;
+		data->ac->wait = 0.f;
+    }
+    node->state = GS_AI_BT_STATE_SUCCESS;
+}
+
+void bsf_ai_task_move_to_target_location(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+    float dist = gs_vec3_dist(data->tc->xform.translation, data->ac->target);
+    float speed = dist * dt * 50.f;
+	bsf_t* bsf = gs_user_data(bsf_t);
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+
+    // Face player while moving 
+    gs_vec3 diff = gs_vec3_sub(data->ptc->xform.translation, data->tc->xform.translation);
+    diff.y = 0.f;
+    gs_vec3 dir = gs_vec3_norm(diff);
+    gs_vec3 forward = gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f)); 
+    forward.y = 0.f;
+    forward = gs_vec3_norm(forward);
+    gs_quat rot = gs_quat_from_to_rotation(forward, dir);
+    data->tc->xform.rotation = rot; //gs_quat_slerp(data->tc->xform.rotation, rot, 0.8f);
+
+    // Debug draw line
+    gsi_defaults(&bsf->gs.gsi);
+    gsi_depth_enabled(&bsf->gs.gsi, true);
+    gsi_camera(&bsf->gs.gsi, &bsf->scene.camera.cam, (u32)fbs.x, (u32)fbs.y);
+    gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(dir, 10.f)), GS_COLOR_RED); 
+    gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(forward, 5.f)), GS_COLOR_BLUE);
+
+    if (dist > 1.f) {
+        gs_vec3 vel = gs_vec3_scale(gs_vec3_norm(gs_vec3_sub(data->ac->target, data->tc->xform.translation)), speed);
+        gs_vec3 np = gs_vec3_add(data->tc->xform.translation, vel);
+        data->tc->xform.translation = gs_v3(
+            gs_interp_smoothstep(data->tc->xform.translation.x, np.x, 0.1f),
+            gs_interp_smoothstep(data->tc->xform.translation.y, np.y, 0.1f),
+            gs_interp_smoothstep(data->tc->xform.translation.z, np.z, 0.1f)
+        );
+		node->state = GS_AI_BT_STATE_RUNNING;
+    }
+    else {
+        node->state = GS_AI_BT_STATE_SUCCESS;
+    }
+}
+
+void bsf_ai_task_shoot_at_player(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{
+	bsf_t* bsf = gs_user_data(bsf_t);
+    const float dt = gs_platform_time()->delta; 
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+
+    const gs_vec3 diff = gs_vec3_sub(data->ptc->xform.translation, data->tc->xform.translation);
+    float dist2 = gs_vec3_len2(diff);
+
+    const gs_vec3 spread = gs_vec3_norm(gs_v3(
+        gs_rand_gen(&bsf->run.rand),
+        gs_rand_gen(&bsf->run.rand),
+        gs_rand_gen(&bsf->run.rand)
+    ));
+    const gs_vec3 dir = gs_vec3_norm(gs_vec3_add(diff, gs_vec3_scale(spread, dist2 * 0.00005f)));
+    const gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f))); 
+    const gs_vec3 up = gs_vec3_norm(gs_quat_rotate(data->tc->xform.rotation, GS_YAXIS)); 
+    gs_quat rotation = gs_quat_from_to_rotation(forward, dir); 
+
+    // Debug draw line
+    gsi_defaults(&bsf->gs.gsi);
+    gsi_depth_enabled(&bsf->gs.gsi, true);
+    gsi_camera(&bsf->gs.gsi, &bsf->scene.camera.cam, (u32)fbs.x, (u32)fbs.y);
+    gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(dir, 10.f)), GS_COLOR_RED); 
+    gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(forward, 5.f)), GS_COLOR_BLUE);
+
+    // Fire
+    if (data->gc->time >= 10.f && gs_rand_gen_long(&bsf->run.rand) % 3)
+    { 
+        data->gc->time = 0.f;
+
+        // Fire projectile using forward of player transform
+        gs_vec3 forward = dir; 
+        gs_vqs xform = (gs_vqs){
+            .translation = data->tc->xform.translation, 
+            .rotation = rotation,// rotation,   // Need rotation from forward to player
+            .scale = gs_v3s(0.2f)
+        };
+
+        bsf_projectile_create(bsf, data->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, 4.5f));
+
+        if (gs_rand_gen_long(&bsf->run.rand) % 2) node->state = GS_AI_BT_STATE_SUCCESS;
+    }
+    else
+    {
+        node->state = GS_AI_BT_STATE_RUNNING;
+    }
+
+    data->gc->time += 1.f * gs_rand_gen_range(&bsf->run.rand, 0.1f, 2.f); 
+}
+
+void bsf_ai_task_random_impulse(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{ 
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+    bsf_t* bsf = gs_user_data(bsf_t);
+    gs_vec3 impulse = gs_v3(
+        gs_rand_gen_range(&bsf->run.rand, -1.f, 1.f),
+        0.f, 
+        -1.f
+    );
+    gs_vec3 angular_impulse = gs_v3(
+        gs_rand_gen_range(&bsf->run.rand, -1.f, 1.f),
+        gs_rand_gen_range(&bsf->run.rand, -1.f, 1.f), 
+        gs_rand_gen_range(&bsf->run.rand, -1.f, 1.f)
+    );
+    data->pc->velocity = gs_vec3_scale(gs_vec3_norm(impulse), gs_rand_gen_range(&bsf->run.rand, 0.1f, 0.3f));
+    data->pc->angular_velocity = gs_vec3_scale(gs_vec3_norm(angular_impulse), 10.f);
+    node->state = GS_AI_BT_STATE_SUCCESS;
+}
+
+void bsf_ai_task_fall_to_death(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{ 
+    const float t = gs_platform_time()->elapsed;
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+    bsf_t* bsf = gs_user_data(bsf_t);
+
+    // Continue to fall until y = 0.f, then diE!
+    gs_quat* rot = &data->tc->xform.rotation;
+    gs_vec3* pos = &data->tc->xform.translation;
+    gs_vec3* vel = &data->pc->velocity;
+    gs_vec3* av = &data->pc->angular_velocity;
+
+    if (pos->y >= 0.f)
+    { 
+        vel->y -= dt * 0.2f;
+        gs_vec3 head = gs_vec3_add(*pos, *vel);
+        gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(head, *pos));
+        *pos = gs_vec3_add(*pos, *vel);
+
+        // Add angular velocity to rotation
+        gs_quat angular = gs_quat_mul_list(3, 
+            gs_quat_angle_axis(av->x + t * 0.002f, GS_XAXIS), 
+            gs_quat_angle_axis(av->y + t * 0.008f, GS_YAXIS), 
+            gs_quat_angle_axis(av->z + t * 0.005f, GS_ZAXIS)
+        );
+
+        gs_vec3 fwd = gs_vec3_norm(gs_quat_rotate(*rot, GS_ZAXIS));
+        gs_quat nrot = gs_quat_mul(angular, gs_quat_from_to_rotation(fwd, dir));
+        *rot = gs_quat_slerp(*rot, angular, 0.1f); 
+
+        node->state = GS_AI_BT_STATE_RUNNING;
+    }
+    else
+    { 
+        node->state = GS_AI_BT_STATE_SUCCESS;
+        bsf_explosion_create(bsf, data->world, &data->tc->xform, BSF_OWNER_PLAYER);
+        bsf_mob_destroy(data->world, data->mob); 
+    } 
+}
+
+static void bsf_bandit_bt(struct gs_ai_bt_t* bt)
+{
+    /* 
+        // Bandit will fly to random location within cone of player 
+        // then turn to face player
+        // then attack for a few seconds
+        // then repeat
+    */ 
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data;
+
+    // If dying, then simulate falling to the ground... that can be a generic shared behavior though.
+    
+    gsai_bt(bt, { 
+        gsai_repeater(bt, { 
+            gsai_selector(bt, {
+
+                // Death sequence 
+                gsai_condition(bt, (data->hc->health <= 0.f), {
+                    gsai_sequence(bt, {
+                        gsai_leaf(bt, bsf_ai_task_random_impulse);
+                        gsai_leaf(bt, bsf_ai_task_fall_to_death);
+                    });
+                });
+
+                // Move/shoot sequence
+                gsai_condition(bt, (data->hc->health > 0.f), {
+                    gsai_sequence(bt, {
+                        gsai_leaf(bt, bsf_ai_task_find_rand_target_location);
+                        gsai_leaf(bt, bsf_ai_task_move_to_target_location);
+                        gsai_wait(bt, &data->ac->wait, dt, 0.3f);
+                        gsai_leaf(bt, bsf_ai_task_shoot_at_player);
+                        gsai_wait(bt, &data->ac->wait, dt, 0.2f);
+                    });
+                });
+            }); 
+        }); 
+    });
+}
 
 GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
 {
@@ -1512,12 +1917,13 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
     const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
     const float t = gs_platform_elapsed_time();
     const float dt = gs_platform_delta_time(); 
-    bsf_component_renderable_immediate_t* rca = ecs_term(it, bsf_component_renderable_immediate_t, 1);
+    bsf_component_renderable_t* rca = ecs_term(it, bsf_component_renderable_t, 1);
     bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 2);
     bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 3); 
     bsf_component_health_t* hca = ecs_term(it, bsf_component_health_t, 4);
     bsf_component_mob_t* mca = ecs_term(it, bsf_component_mob_t, 5);
-    bsf_component_gun_t* bca = ecs_term(it, bsf_component_gun_t, 6);
+    bsf_component_gun_t* bca = ecs_term(it, bsf_component_gun_t, 6); 
+    bsf_component_ai_t* aic = ecs_term(it, bsf_component_ai_t, 7);
     bsf_component_transform_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_transform_t);
 
     if (bsf->dbg) return; 
@@ -1525,87 +1931,64 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
     for (uint32_t i = 0; i < it->count; ++i)
     {
         ecs_entity_t ent = it->entities[i];
-        bsf_component_renderable_immediate_t* rc = &rca[i];
+        bsf_component_renderable_t* rc = &rca[i];
         bsf_component_transform_t* tc = &tca[i];
         bsf_component_physics_t* pc = &pca[i]; 
         bsf_component_health_t* hc = &hca[i];
         bsf_component_mob_t* mc = &mca[i];
         bsf_component_gun_t* gc = &bca[i];
+        bsf_component_ai_t* ai = &aic[i];
         const gs_vec3* ppos = &ptc->xform.translation;
 
-        const gs_vec3 diff = gs_vec3_sub(*ppos, tc->xform.translation);
-        float dist2 = gs_vec3_len2(diff);
+        bsf_ai_data_t ai_data = (bsf_ai_data_t){
+            .gc = gc,
+            .tc = tc,
+            .pc = pc,
+            .hc = hc,
+            .ptc = ptc,
+            .ac = ai,
+            .world = it->world,
+            .mob = ent
+        };
+        ai->bt.ctx.user_data = &ai_data;
 
-        // Do targetting towards player
-        if (dist2 <= 5000.f)
+        switch (mc->type)
         {
-            const gs_vec3 spread = gs_vec3_norm(gs_v3(
-                gs_rand_gen(&bsf->run.rand),
-                gs_rand_gen(&bsf->run.rand),
-                gs_rand_gen(&bsf->run.rand)
-            ));
-            const gs_vec3 dir = gs_vec3_norm(gs_vec3_add(diff, gs_vec3_scale(spread, dist2 * 0.005f)));
-            const gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f))); 
-            const gs_vec3 up = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, GS_YAXIS)); 
-            gs_quat rotation = gs_quat_from_to_rotation(forward, dir); 
+            default:
+            case BSF_MOB_BOX:
+            case BSF_MOB_SPHERE:
+            case BSF_MOB_CONE:
+            {
+            } break;
 
-            // Debug draw line
-            gsi_defaults(gsi);
-            gsi_depth_enabled(gsi, true);
-            gsi_camera(gsi, &bsf->scene.camera.cam, (u32)fbs.x, (u32)fbs.y);
-            gsi_line3Dv(gsi, tc->xform.translation, gs_vec3_add(tc->xform.translation, gs_vec3_scale(dir, 10.f)), GS_COLOR_RED); 
-            gsi_line3Dv(gsi, tc->xform.translation, gs_vec3_add(tc->xform.translation, gs_vec3_scale(forward, 5.f)), GS_COLOR_BLUE);
-
-            // Fire
-            if (gc->time >= 100.f && gs_rand_gen_long(&bsf->run.rand) % 3)
+            case BSF_MOB_BANDIT:
             { 
-                gc->time = 0.f;
-
-                // Fire projectile using forward of player transform
-                gs_vec3 forward = dir; 
-                gs_vqs xform = (gs_vqs){
-                    .translation = tc->xform.translation, 
-                    .rotation = rotation,// rotation,   // Need rotation from forward to player
-                    .scale = gs_v3s(0.2f)
-                };
-
-                bsf_projectile_create(bsf, it->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, 4.5f));
-            }
-
-            gc->time += 1.f * gs_rand_gen_range(&bsf->run.rand, 0.1f, 2.f);
+                bsf_bandit_bt(&ai->bt);
+            } break;
         } 
 
         // Do collision hit
         if (hc->hit)
         {
+            gs_gfxt_material_t* hit_mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.hit"));
+            gs_gfxt_material_set_uniform(hit_mat, "u_color", &(gs_vec3){1.f, 1.f, 1.f}); 
+            bsf_renderable_t* rend = gs_slot_array_getp(bsf->scene.renderables, rc->hndl);
+            rend->material = hit_mat;
+
             if (hc->hit_timer >= 0.1f) {
+                gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
+                rend->material = mat;
                 hc->hit = false;
 				hc->hit_timer = 0.f;
-            }
-
-            if (hc->health <= 0.f)
-            {
-				// Have to iterate over the dynamic array of mobs and remove... 
-				for (uint32_t i = 0; i < gs_dyn_array_size(room->mobs); ++i)
-				{
-					if (ent == room->mobs[i])
-					{ 
-						room->mobs[i] = gs_dyn_array_back(room->mobs);
-						gs_dyn_array_pop(room->mobs);
-						break;
-					}
-				}
-
-                ecs_delete(it->world, ent);
             } 
 
-            rc->color = GS_COLOR_RED; 
+            // rc->color = GS_COLOR_RED; 
             hc->hit_timer += dt;
         }
         else
         {
-            rc->color = GS_COLOR_WHITE;
-        }
+            // rc->color = GS_COLOR_WHITE;
+        } 
     }
 }
 
@@ -1753,9 +2136,9 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
 							{ 
 								bsf_component_health_t* h = ecs_get(bsf->entities.world, mob, bsf_component_health_t);
 								h->hit = true; 
-								h->health -= 0.1f;
+								h->health -= 1.f;
 								h->hit_timer = 0.f;
-                                bsf_camera_shake(bsf, &bsf->scene.camera, 0.01f);
+                                bsf_camera_shake(bsf, &bsf->scene.camera, 0.1f);
 								ecs_delete(it->world, projectile);
 								break;
 							} 
@@ -1844,6 +2227,12 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
 GS_API_DECL void bsf_player_init(struct bsf_t* bsf)
 { 
     // This should all be initialized based on what the run context actually is
+    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
+    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.ship"));
+    gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.arwing"));
+    gs_gfxt_material_t* gsi_mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
+    gs_gfxt_material_set_uniform(mat, "u_tex", tex); 
+    gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 0.f, 0.f}); 
 
     bsf->entities.player = ecs_new(bsf->entities.world, 0); 
     ecs_entity_t p = bsf->entities.player;
@@ -1864,19 +2253,13 @@ GS_API_DECL void bsf_player_init(struct bsf_t* bsf)
     ecs_set(bsf->entities.world, p, bsf_component_barrel_roll_t, {0});
 
     ecs_set(bsf->entities.world, p, bsf_component_character_stats_t, {
-        .speed = 3,
-        .fire_rate = 2,
-        .shot_speed = 1
+        .speed = 10.f,
+        .fire_rate = 4.f,
+        .shot_speed = 1.4f
     }); 
 
     ecs_set(bsf->entities.world, p, bsf_component_gun_t, {0});
     
-    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
-    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.arwing"));
-    gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.arwing"));
-    gs_gfxt_material_t* gsi_mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
-    gs_gfxt_material_set_uniform(mat, "u_tex", tex);
-
     ecs_set(bsf->entities.world, p, bsf_component_renderable_t, { 
         .hndl = bsf_graphics_scene_renderable_create(&bsf->scene, &(bsf_renderable_desc_t){
             .material = mat,
@@ -1912,6 +2295,8 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
     bsf_t* bsf = gs_user_data(bsf_t); 
     const float t = gs_platform_elapsed_time();
     const float dt = gs_platform_delta_time() * bsf->run.time_scale; 
+    const gs_platform_input_t* input = &gs_subsystem(platform)->input;
+    const gs_platform_gamepad_t* gp = &input->gamepads[0];
     bsf_component_renderable_t* rca = ecs_term(it, bsf_component_renderable_t, 1);
     bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 2);
     bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 3); 
@@ -1921,6 +2306,8 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
     bsf_component_camera_track_t* cca = ecs_term(it, bsf_component_camera_track_t, 7);
     bsf_component_barrel_roll_t* bca = ecs_term(it, bsf_component_barrel_roll_t, 8);
     bsf_component_inventory_t* ica = ecs_term(it, bsf_component_inventory_t, 9);
+
+    const float gp_thresh = 0.2f;
 
     if (bsf->dbg) return;
 
@@ -1935,6 +2322,12 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
     }
     else if (gs_platform_key_down(GS_KEYCODE_LEFT_CONTROL)) {
         mod = 0.1f;
+    }
+
+    if (gp->present)
+    {
+        if (gp->axes[GS_PLATFORM_JOYSTICK_AXIS_LTRIGGER] >= 0.4f) mod = 0.1f; 
+        else if (gp->axes[GS_PLATFORM_JOYSTICK_AXIS_RTRIGGER] >= 0.4f) mod = 2.f;
     }
 
     for (uint32_t i = 0; i < it->count; ++i)
@@ -1984,8 +2377,8 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
         }
 
         // Update player position based on input
-        const gs_vec2 xb = gs_v2(-12.f, 12.f);
-        const gs_vec2 yb = gs_v2(-4.f, 11.f);
+        const gs_vec2 xb = gs_v2(-10.f, 10.f);
+        const gs_vec2 yb = gs_v2(0.f, 8.f); 
         gs_vec3* ps = &tc->xform.position;
         gs_vec3 v = gs_v3s(0.f);
 
@@ -1993,6 +2386,9 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
         if (gs_platform_key_down(GS_KEYCODE_S) || gs_platform_key_down(GS_KEYCODE_DOWN))  {v.y = ps->y < yb.y ? v.y + 1.f : 0.f;}
         if (gs_platform_key_down(GS_KEYCODE_A) || gs_platform_key_down(GS_KEYCODE_LEFT))  {v.x = ps->x > xb.x ? v.x - 1.f : 0.f;}
         if (gs_platform_key_down(GS_KEYCODE_D) || gs_platform_key_down(GS_KEYCODE_RIGHT)) {v.x = ps->x < xb.y ? v.x + 1.f : 0.f;} 
+
+        if (fabsf(gp->axes[1]) > gp_thresh) v.y = gp->axes[1];
+        if (fabsf(gp->axes[0]) > gp_thresh) v.x = gp->axes[0];
 
         if (bc->active)
         {
@@ -2003,8 +2399,9 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
         {
             case BSF_MOVEMENT_FREE_RANGE:
             { 
-                // Normalize velocity then scale by player speed
-                v = gs_vec3_scale(gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, v)), pc->speed); 
+                // Normalize velocity then scale by player speed 
+                v = gp->present ? v : gs_vec3_norm(v);
+                v = gs_vec3_scale(v, pc->speed * mod * 150.f * dt);
 
                 // Forward impulse
                 gs_vec3 forward = gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f)); 
@@ -2031,12 +2428,69 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
                 if (gs_platform_key_down(GS_KEYCODE_Q)) av.z += 1.f;
                 if (gs_platform_key_down(GS_KEYCODE_E)) av.z -= 1.f;
 
-                av = gs_vec3_scale(gs_vec3_norm(av), 80.2f * dt); 
+                av = gs_vec3_scale(gs_vec3_norm(av), 80.f * dt); 
 
                 const float max_rotx = 90.f;
                 const float max_roty = 90.f;
                 const float max_rotz = 90.f;
                 const float cmax_rotz = 45.f;
+
+                bool double_click_right = false;
+                bool double_click_left = false;
+
+                if (gp->present)
+                {
+                    static bool count[2] = {0};
+                    static float press_time[2] = {1.f, 1.f}; 
+                    static bool was_pressed[2] = {0};
+
+                    if (fabsf(gp->axes[1]) > gp_thresh) av.y = gp->axes[1];
+                    if (fabsf(gp->axes[0]) > gp_thresh) {av.x = -gp->axes[0]; av.z = -gp->axes[0] * 0.2f;}
+
+                    if (!bc->active && gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_RBUMPER]) {
+
+                        if (!was_pressed[1]) { 
+                            if (press_time[1] < 0.5f) double_click_right = true;
+                            press_time[1] = 0.f;
+                        } 
+                        av.z -= 1.f; 
+                    }
+                    if (!bc->active && gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_LBUMPER]) {
+
+                        if (!was_pressed[0]) { 
+                            if (press_time[0] < 0.5f) double_click_left = true;
+                            press_time[0] = 0.f;
+                        } 
+                        av.z += 1.f; 
+                    } 
+
+                    press_time[0] = gs_min(press_time[0] + dt, 1.f); 
+                    press_time[1] = gs_min(press_time[1] + dt, 1.f);
+
+                    av = gs_vec3_scale(av, 80.f * dt);
+
+                    was_pressed[0] = gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_LBUMPER];
+                    was_pressed[1] = gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_RBUMPER];
+                } 
+
+                if (double_click_right && !bc->active)
+                {
+                    bc->active = true;
+                    bc->time = 0.f;
+                    bc->direction = -1;
+                    bc->vel_dir = 1;
+                    bc->avz = pc->angular_velocity.z;
+                    bc->max_time = 0.5f;
+                }
+                else if (double_click_left && !bc->active)
+                {
+                    bc->active = true;
+                    bc->time = 0.f;
+                    bc->direction = 1;
+                    bc->vel_dir = -1;
+                    bc->avz = pc->angular_velocity.z;
+                    bc->max_time = 0.5f;
+                } 
 
                 // Barrel roll
                 if (gs_platform_key_pressed(GS_KEYCODE_B) && !bc->active)
@@ -2100,75 +2554,156 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
                     gs_quat_angle_axis(gs_deg2rad(pav->z), GS_ZAXIS)
                 ); 
 
-                for (uint32_t m = 0; m < gs_dyn_array_size(room->mobs); ++m)
-                {
-                    ecs_entity_t mob = room->mobs[m]; 
-                    bsf_component_transform_t* mtc = ecs_get(bsf->entities.world, mob, bsf_component_transform_t);
-                    bsf_component_physics_t* mpc = ecs_get(bsf->entities.world, mob, bsf_component_physics_t); 
-
-                    gs_contact_info_t res = bsf_component_physics_collide(pc, &tc->xform, mpc, &mtc->xform); 
-
-                    if (res.hit)
-                    { 
-                        bsf_component_health_t* h = ecs_get(bsf->entities.world, mob, bsf_component_health_t);
-                        h->hit = true; 
-                        h->health -= 1.f;
-                        h->hit_timer = 0.f;
-                        break;
-                    } 
-                }
-
             } break;
 
             case BSF_MOVEMENT_RAIL:
-            {
+            { 
                 // Normalize velocity then scale by player speed
-                v = gs_vec3_scale(gs_vec3_norm(v), mod * 3.f * dt);
+                v = gp->present ? v : gs_vec3_norm(v);
+                v = gs_vec3_scale(v, pc->speed * mod * 150.f * dt);
 
-                const float lerp = 0.1f;
+                const float lerp = (ps->y >= yb.y && v.y < 0 || ps->y <= yb.x && v.y > 0 || ps->x >= xb.y && v.x < 0 || ps->x <= xb.x && v.x > 0) ? 0.2f : 0.1f;
 
                 // Add to velocity
                 pc->velocity = gs_v3(
-                    gs_interp_linear(pc->velocity.x, v.x, lerp),
-                    gs_interp_linear(pc->velocity.y, v.y, lerp),
-                    gs_interp_linear(pc->velocity.z, v.z, lerp)
+                    gs_interp_smoothstep(pc->velocity.x, v.x, lerp),
+                    gs_interp_smoothstep(pc->velocity.y, v.y, lerp),
+                    gs_interp_smoothstep(pc->velocity.z, v.z, lerp)
                 );
 
-                tc->xform.position = gs_vec3_add(tc->xform.position, pc->velocity);
+                gs_vec3 pnp = gs_vec3_add(tc->xform.position, pc->velocity);
+                pnp = gs_v3(
+                    gs_clamp(pnp.x, xb.x, xb.y),
+                    gs_clamp(pnp.y, yb.x, yb.y),
+                    pnp.z
+                );
+                tc->xform.position = pnp;
 
                 // Move slowly back to origin
                 float nz = -tc->xform.position.z;
-                tc->xform.position.z = gs_interp_linear(tc->xform.position.z, 25.f, 0.3f);
+                tc->xform.position.z = gs_interp_linear(tc->xform.position.z, 25.f, 0.3f); 
 
                 gs_vec3 av = gs_v3s(0.f);
                 bool br = false;
-                if (gs_platform_key_down(GS_KEYCODE_W)) av.y -= 1.f;
-                if (gs_platform_key_down(GS_KEYCODE_S)) av.y += 1.f;
-                if (gs_platform_key_down(GS_KEYCODE_A)) {av.x += 1.f; av.z += 0.05;}
-                if (gs_platform_key_down(GS_KEYCODE_D)) {av.x -= 1.f; av.z -= 0.05f;}
+                if (gs_platform_key_down(GS_KEYCODE_W) && ps->y > yb.x) av.y -= 1.f;
+                if (gs_platform_key_down(GS_KEYCODE_S) && ps->y < yb.y) av.y += 1.f;
+                if (gs_platform_key_down(GS_KEYCODE_A) && ps->x > xb.x) {av.x += 1.f; av.z += 0.1f;}
+                if (gs_platform_key_down(GS_KEYCODE_D) && ps->x < xb.y) {av.x -= 1.f; av.z -= 0.1f;}
                 if (gs_platform_key_down(GS_KEYCODE_Q)) av.z += 1.f;
                 if (gs_platform_key_down(GS_KEYCODE_E)) av.z -= 1.f;
                 if (gs_platform_key_down(GS_KEYCODE_B)) {br = true; av.z += 1.f;}
-                av = gs_vec3_scale(gs_vec3_norm(av), 2.0f);
-                av.z = br ? av.z * 50.f : av.z * 10.f;
-                // Add negated angular velocity to this
-                av = gs_vec3_add(av, gs_vec3_scale(gs_vec3_neg(pc->angular_velocity), 3.5 * dt));
+                av = gs_vec3_scale(gs_vec3_norm(av), 180.f * dt);
 
-                pc->angular_velocity = gs_vec3_add(pc->angular_velocity, av);
-                gs_vec3* pav = &pc->angular_velocity;
-                const float max_rotx = 60.f;
-                const float max_roty = 30.f;
+                bool double_click_right = false;
+                bool double_click_left = false;
+
+                if (gp->present)
+                {
+                    static bool count[2] = {0};
+                    static float press_time[2] = {1.f, 1.f}; 
+                    static bool was_pressed[2] = {0};
+
+                    if (fabsf(gp->axes[1]) > gp_thresh && ps->y > yb.x && ps->y < yb.y) av.y = gp->axes[1];
+                    if (fabsf(gp->axes[0]) > gp_thresh && ps->x > xb.x && ps->x < xb.y) {av.x = -gp->axes[0]; av.z = -gp->axes[0] * 0.2f;}
+
+                    if (!bc->active && gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_RBUMPER]) {
+
+                        if (!was_pressed[1]) { 
+                            if (press_time[1] < 0.5f) double_click_right = true;
+                            press_time[1] = 0.f;
+                        } 
+
+                        av.z -= 1.f; 
+                    }
+                    if (!bc->active && gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_LBUMPER]) {
+
+                        if (!was_pressed[0]) { 
+                            if (press_time[0] < 0.5f) double_click_left = true;
+                            press_time[0] = 0.f;
+                        } 
+
+                        av.z += 1.f; 
+                    } 
+
+                    press_time[0] = gs_min(press_time[0] + dt, 1.f); 
+                    press_time[1] = gs_min(press_time[1] + dt, 1.f);
+
+                    av = gs_vec3_scale(av, 180.f * dt);
+
+                    was_pressed[0] = gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_LBUMPER];
+                    was_pressed[1] = gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_RBUMPER];
+                }
+
+                float brz = 0.f;
+
+                if (double_click_right && !bc->active)
+                {
+                    bc->active = true;
+                    bc->time = 0.f;
+                    bc->direction = -1;
+                    bc->vel_dir = 1;
+                    bc->avz = pc->angular_velocity.z;
+                    bc->max_time = 0.5f;
+                }
+                else if (double_click_left && !bc->active)
+                {
+                    bc->active = true;
+                    bc->time = 0.f;
+                    bc->direction = 1;
+                    bc->vel_dir = -1;
+                    bc->avz = pc->angular_velocity.z;
+                    bc->max_time = 0.5f;
+                } 
+
+                // Barrel roll
+                if (gs_platform_key_pressed(GS_KEYCODE_B) && !bc->active)
+                {
+                    bc->active = true;
+                    bc->time = 0.f;
+                    bc->direction = av.z >= 0.f ? 1 : -1;
+                    bc->vel_dir = av.z < 0.f ? 1 : av.z > 0.f ? -1 : 0;
+                    bc->avz = pc->angular_velocity.z;
+                    bc->max_time = 0.5f;
+                }
+                if (bc->active) 
+                {
+                    bc->time += dt;
+                    const uint16_t rotations = 3;
+                    float v = gs_map_range(0.f, bc->max_time, 0.f, 1.f, bc->time);
+                    v = gs_interp_deceleration(0.f, 1.f, v);
+                    brz = (v * (float)rotations * 360.f) * bc->direction;
+                    brz = fmodf(brz + bc->avz, 360.f);
+                }
+                if (bc->time > bc->max_time && bc->active)
+                {
+                    bc->active = false;
+                    pc->angular_velocity.z = bc->avz;
+                }
+
+                const float max_rotx = 30.f;
+                const float max_roty = 60.f;
                 const float max_rotz = 90.f;
-                pav->x = gs_clamp(pav->x, -max_rotx, max_rotx);
-                pav->y = gs_clamp(pav->y, -max_roty, max_roty);
-                pav->z = br ? pav->z : gs_clamp(pav->z, -max_rotz, max_rotz);
+
+                // Add negated angular velocity to this
+                av.z = bc->active ? av.z * 50.f : av.z * 10.f; 
+                gs_vec3 nav = gs_vec3_scale(pc->angular_velocity, -2.5f * dt);
+
+                const float plerp = 0.45f;
+                gs_vec3* pav = &pc->angular_velocity;
+                gs_vec3 npav = pc->angular_velocity;
+                pav->x = gs_clamp(gs_interp_smoothstep(pav->x, pav->x + av.x, plerp), -max_rotx, max_rotx);
+                pav->y = gs_clamp(gs_interp_smoothstep(pav->y, pav->y + av.y, plerp), -max_roty, max_roty);
+                pav->z = bc->active ? brz : gs_interp_smoothstep(pav->z, gs_clamp(pav->z + av.z, -max_rotz, max_rotz), plerp);
+                pav->x = gs_interp_smoothstep(pav->x, pav->x + nav.x, 0.85f);
+                pav->y = gs_interp_smoothstep(pav->y, pav->y + nav.y, 0.85f);
+                pav->z = gs_interp_smoothstep(pav->z, pav->z + nav.z, 0.85f);
 
                 // Do rotation (need barrel roll rotation)
                 tc->xform.rotation = gs_quat_mul_list(3,
-                    gs_quat_angle_axis(gs_deg2rad(pc->angular_velocity.x), GS_YAXIS),
-                    gs_quat_angle_axis(gs_deg2rad(pc->angular_velocity.y), GS_XAXIS),
-                    gs_quat_angle_axis(gs_deg2rad(pc->angular_velocity.z), GS_ZAXIS)
-                );
+                    gs_quat_angle_axis(gs_deg2rad(pav->x), GS_YAXIS),
+                    gs_quat_angle_axis(gs_deg2rad(pav->y), GS_XAXIS),
+                    gs_quat_angle_axis(gs_deg2rad(pav->z), GS_ZAXIS)
+                ); 
 
             } break;
         } 
@@ -2177,15 +2712,35 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
         bsf_renderable_t* rend = gs_slot_array_getp(bsf->scene.renderables, rc->hndl);
         rend->model = gs_vqs_to_mat4(&tc->xform);
 
-        if (gs_platform_mouse_down(GS_MOUSE_LBUTTON) && !gc->firing) {
-            gc->firing = true;
+        for (uint32_t m = 0; m < gs_dyn_array_size(room->mobs); ++m)
+        {
+            ecs_entity_t mob = room->mobs[m]; 
+            bsf_component_transform_t* mtc = ecs_get(bsf->entities.world, mob, bsf_component_transform_t);
+            bsf_component_physics_t* mpc = ecs_get(bsf->entities.world, mob, bsf_component_physics_t); 
+
+            gs_contact_info_t res = bsf_component_physics_collide(pc, &tc->xform, mpc, &mtc->xform); 
+
+            if (res.hit)
+            { 
+                bsf_component_health_t* h = ecs_get(bsf->entities.world, mob, bsf_component_health_t);
+                h->hit = true; 
+                h->health -= 1.f;
+                h->hit_timer = 0.f;
+                break;
+            } 
+        } 
+
+        {
+            if ((gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_A] || gs_platform_mouse_down(GS_MOUSE_LBUTTON)) && !gc->firing) {
+                gc->firing = true;
+            }
+            if (!gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_A] && !gs_platform_mouse_down(GS_MOUSE_LBUTTON)) {
+                gc->firing = false;
+            } 
+            if (gc->firing) {
+                gc->time += psc->fire_rate * dt * 100.f;
+            } 
         }
-        if (gs_platform_mouse_released(GS_MOUSE_LBUTTON)) {
-            gc->firing = false;
-        } 
-        if (gc->firing) {
-            gc->time += psc->fire_rate * dt * 100.f;
-        } 
 
         // Fire
         if (gc->firing && gc->time >= 30.f)
@@ -2207,7 +2762,7 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
             bsf_camera_shake(bsf, &bsf->scene.camera, 0.05f);
         }
 
-        if (ic->bombs && gs_platform_mouse_pressed(GS_MOUSE_RBUTTON))
+        if (ic->bombs && gs_platform_mouse_pressed(GS_MOUSE_RBUTTON) || gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_B])
         {
             // Fire projectile using forward of player transform
             gs_vec3 cam_forward = gs_vec3_scale(gs_vec3_norm(gs_camera_forward(&bsf->scene.camera.cam)), 100.f);
@@ -2257,53 +2812,104 @@ GS_API_DECL void bsf_player_item_pickup(struct bsf_t* bsf, ecs_world_t* world, b
 
 //=== BSF Menus ===//
 
-GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
+#define BSF_GUI_ELEMENT_CENTERED(...)\
+    do {\
+        gs_gui_layout_next(gui);\
+        __VA_ARGS__;\
+    } while (0);
+
+
+static void bsf_gui_menu_panel_row_begin(struct bsf_t* bsf, gs_gui_layout_t* layout, gs_vec2 size, gs_vec2 offset, float mp)
 {
-    gs_command_buffer_t* cb = &bsf->gs.cb;
-    gs_gui_context_t* gui = &bsf->gs.gui;
-    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
-
-    int32_t opt = GS_GUI_OPT_FULLSCREEN | 
-                  GS_GUI_OPT_NOTITLE | 
-                  GS_GUI_OPT_NOBORDER | 
-                  GS_GUI_OPT_NOMOVE | 
-                  GS_GUI_OPT_NORESIZE;
-
-    gs_gui_begin_window_ex(gui, "#menu", gs_gui_rect(0, 0, 100, 100), NULL, opt);
-
-    switch (bsf->state) 
+    // Anchor to current layout
+    gs_gui_rect_t lrect = layout->body;
+    gs_gui_rect_t anchor = gs_gui_layout_anchor(&lrect, size.x, size.y, offset.x, offset.y, GS_GUI_LAYOUT_ANCHOR_CENTER);
+    gs_gui_layout_set_next(&bsf->gs.gui, anchor, 0);
+    gs_gui_panel_begin(&bsf->gs.gui, "##panel");
     {
-        case BSF_STATE_TITLE:
-        {
-            gs_gui_label(gui, "Binding of Star Fox");
-            gs_gui_label(gui, "PRESS START");
+        float m = lrect.w * mp; 
+        float w = (lrect.w * 0.5f) - m;
+        gs_gui_layout_row(&bsf->gs.gui, 2, (int[]){m, -m}, 0);
+    } 
+}
 
-            if (
-                gs_platform_key_pressed(GS_KEYCODE_ESC)
-            )
-            {
-                gs_quit();
+static void bsf_gui_menu_panel_row_end(struct bsf_t* bsf)
+{
+    gs_gui_panel_end(&bsf->gs.gui);
+}
+
+static void bsf_game_setup_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
+{ 
+    gs_gui_context_t* gui = &bsf->gs.gui;
+    gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+    gs_gui_layout_t* layout = gs_gui_get_layout(gui);
+
+    if (gs_platform_key_pressed(GS_KEYCODE_ESC))
+    {
+        bsf->state = BSF_STATE_MAIN_MENU;
+    } 
+
+    bsf_gui_menu_panel_row_begin(bsf, layout, gs_v2(layout->body.w, layout->body.h * 0.7f), gs_v2(0.f, 0.f), 0.3f);
+    {
+        layout = gs_gui_get_layout(gui);
+
+        BSF_GUI_ELEMENT_CENTERED({
+            if (gs_gui_button_ex(gui, "Play", &(gs_gui_selector_desc_t){.classes = {"top_panel_item"}}, 0x00)) {
+                bsf->state = BSF_STATE_START;
+                bsf->run.is_playing = true;
             } 
+        }); 
 
-            if (
-                gs_platform_key_pressed(GS_KEYCODE_ENTER) || 
-                gs_platform_key_pressed(GS_KEYCODE_SPACE)
-            )
-            {
-                bsf->state = BSF_STATE_MAIN_MENU;
-            }
+        float w = 150.f;
+        gs_gui_layout_row_ex(gui, 2, (int[]){w, w}, 0, GS_GUI_JUSTIFY_CENTER);
+        gs_gui_label_ex(gui, "Seed : ", &(gs_gui_selector_desc_t){.classes = {"seed"}}, 0x00); 
+        gs_gui_textbox_ex(gui, bsf->run.seed, BSF_SEED_MAX_LEN, NULL, 0x00);
+    } 
+    bsf_gui_menu_panel_row_end(bsf);
 
-        } break;
+}
 
-        case BSF_STATE_MAIN_MENU:
-        {
-            if (gs_platform_key_pressed(GS_KEYCODE_ESC))
-            {
-                bsf->state = BSF_STATE_TITLE;
-            }
+static void bsf_options_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
+{ 
+    gs_gui_context_t* gui = &bsf->gs.gui;
+    gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+    gs_gui_layout_t* layout  = gs_gui_get_layout(gui);
 
-            // This will go to a "character select screen"
-            if (gs_gui_button(gui, "Play"))
+    if (gs_platform_key_pressed(GS_KEYCODE_ESC))
+    {
+        if (bsf->run.is_playing) bsf->state = BSF_STATE_PAUSE;
+        else                     bsf->state = BSF_STATE_MAIN_MENU;
+    }
+
+    bsf_gui_menu_panel_row_begin(bsf, layout, gs_v2(layout->body.w * 0.9f, layout->body.h * 0.7f), gs_v2(0.f, 0.f), 0.3f);
+    {
+        BSF_GUI_ELEMENT_CENTERED({
+            if (gs_gui_button_ex(gui, "Back", &(gs_gui_selector_desc_t){.classes ={"top_panel_item"}}, 0x00)) {
+                if (bsf->run.is_playing) bsf->state = BSF_STATE_PAUSE;
+                else                     bsf->state = BSF_STATE_MAIN_MENU;
+            } 
+        });
+    }
+    bsf_gui_menu_panel_row_end(bsf);
+
+}
+
+static void bsf_main_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
+{
+    gs_gui_context_t* gui = &bsf->gs.gui;
+    gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+    gs_gui_layout_t* layout = gs_gui_get_layout(gui);
+
+    if (gs_platform_key_pressed(GS_KEYCODE_ESC))
+    {
+        bsf->state = BSF_STATE_TITLE;
+    }
+
+    bsf_gui_menu_panel_row_begin(bsf, layout, gs_v2(layout->body.w * 0.9f, layout->body.h * 0.9f), gs_v2(0.f, 0.f), 0.3f);
+    {
+        // This will go to a "character select screen"
+        BSF_GUI_ELEMENT_CENTERED({ 
+            if (gs_gui_button_ex(gui, "New Run", &(gs_gui_selector_desc_t){.classes ={"top_panel_item"}}, 0x00))
             {
                 bsf->state = BSF_STATE_GAME_SETUP; 
 
@@ -2313,42 +2919,184 @@ GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
                 gs_platform_uuid_to_string(str, &uuid);
                 memcpy(bsf->run.seed, str, BSF_SEED_MAX_LEN - 1);
             } 
+        });
 
+        BSF_GUI_ELEMENT_CENTERED({
             if (gs_gui_button(gui, "Editor"))
             {
                 bsf->state = BSF_STATE_EDITOR_START;
             }
+        });
 
+        BSF_GUI_ELEMENT_CENTERED({ 
             if (gs_gui_button(gui, "Options"))
             {
                 bsf->state = BSF_STATE_OPTIONS;
             }
+        });
 
+        BSF_GUI_ELEMENT_CENTERED({
+            if (gs_gui_button(gui, "Test Suite"))
+            {
+                bsf->state = BSF_STATE_TEST;
+            }
+        });
+
+        BSF_GUI_ELEMENT_CENTERED({
             if (gs_gui_button(gui, "Quit"))
             {
-                bsf->state = BSF_STATE_QUIT;
+                bsf->state = BSF_STATE_QUIT; 
             }
-        } break;
+        });
+    }
+    bsf_gui_menu_panel_row_end(bsf);
 
+}
+
+static void bsf_title_screen(struct bsf_t* bsf, const gs_gui_rect_t* parent)
+{
+    gs_gui_context_t* gui = &bsf->gs.gui;
+    gs_platform_input_t* input = &gs_subsystem(platform)->input; 
+	const float t = gs_platform_elapsed_time();
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
+	gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+    gs_gui_layout_t* layout = gs_gui_get_layout(gui);
+
+    // Simulate movement
+    int32_t y = (int32_t)gs_map_range(0.f, 1.f, 1.f, 6.f, (sin(t * 0.001f) * 0.5f + 0.5f));
+    gs_gui_layout_row(gui, 1, (int[]) {-1}, y); gs_gui_layout_next(gui);
+
+    bsf_gui_menu_panel_row_begin(bsf, layout, gs_v2(layout->body.w * 0.9f, layout->body.h * 0.9f), gs_v2(0.f, y), 0.01f);
+    {
+        BSF_GUI_ELEMENT_CENTERED({
+            gs_gui_label_ex(gui, "The Binding of", &(gs_gui_selector_desc_t){.id = "title_bind", .classes = {"margin_title"}}, 0x00);
+        });
+
+        BSF_GUI_ELEMENT_CENTERED({
+            gs_gui_label_ex(gui, "Starfox", &(gs_gui_selector_desc_t){.id = "title_sf", .classes ={"hover_red"}}, 0x00);
+        });
+    } 
+    bsf_gui_menu_panel_row_end(bsf);
+
+    gs_gui_rect_t anchor = gs_gui_layout_anchor(parent, parent->w, 50, 0, -50, GS_GUI_LAYOUT_ANCHOR_BOTTOMLEFT);
+    gs_gui_layout_set_next(gui, anchor, 0);
+    gs_gui_panel_begin_ex(gui, "##start", NULL, GS_GUI_OPT_NOSCROLL);
+    {
+        gs_gui_layout_row(gui, 1, (int[]){-1}, 0);
+        if (gs_gui_label_ex(gui, "Press Start", &(gs_gui_selector_desc_t){.classes={"start_lbl", "hover_red"}}, 0x00) || 
+            input->gamepads[0].buttons[GS_PLATFORM_GAMEPAD_BUTTON_START] || 
+            input->gamepads[0].buttons[GS_PLATFORM_GAMEPAD_BUTTON_A]) {
+            bsf->state = BSF_STATE_MAIN_MENU;
+        }
+    }
+    gs_gui_panel_end(gui); 
+
+    if (
+        gs_platform_key_pressed(GS_KEYCODE_ESC)
+    )
+    {
+        gs_quit();
+    } 
+
+    if (
+        gs_platform_key_pressed(GS_KEYCODE_ENTER) || 
+        gs_platform_key_pressed(GS_KEYCODE_SPACE)
+    )
+    {
+        bsf->state = BSF_STATE_MAIN_MENU;
+    }
+} 
+
+GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
+{
+    gs_command_buffer_t* cb = &bsf->gs.cb;
+    gs_gui_context_t* gui = &bsf->gs.gui;
+	const float t = gs_platform_elapsed_time();
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
+
+    // Assets
+    const gs_gui_style_sheet_t* ss = gs_hash_table_getp(bsf->assets.style_sheets, gs_hash_str64("ss.title")); 
+    const gs_gfxt_texture_t* title_bg = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.title_bg"));
+    const gs_gfxt_texture_t* vignette = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.vignette"));
+
+    // Reset style sheet to default at top of frame
+    gs_gui_set_style_sheet(gui, NULL);
+
+    int32_t opt = GS_GUI_OPT_FULLSCREEN |
+                  GS_GUI_OPT_NOTITLE |
+                  GS_GUI_OPT_NOBORDER |
+                  GS_GUI_OPT_NOMOVE |
+                  GS_GUI_OPT_NOSCROLL |
+                  GS_GUI_OPT_NORESIZE;
+
+    switch (bsf->state) 
+    {
+        case BSF_STATE_MAIN_MENU:
+        case BSF_STATE_OPTIONS:
         case BSF_STATE_GAME_SETUP:
+        case BSF_STATE_TITLE:
         {
-            if (gs_platform_key_pressed(GS_KEYCODE_ESC))
+            gs_gui_rect_t anchor = {0};
+
+            // Bind style sheet
+            gs_gui_set_style_sheet(gui, ss); 
+
+            gs_vec2 ws = {800.f, 500.f}; 
+            gs_gui_window_begin_ex(gui, "##title", gs_gui_rect((fbs.x - ws.x) * 0.5f, (fbs.y - ws.y) * 0.5f, ws.x, ws.y), NULL, NULL, opt); 
             {
-                bsf->state = BSF_STATE_MAIN_MENU;
+                gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+
+                // Do background image
+                {
+                    anchor = gs_gui_layout_anchor(&cnt->body, 3000, 3000, 0, 210, GS_GUI_LAYOUT_ANCHOR_CENTER);
+                    gs_gui_layout_set_next(gui, anchor, 0);
+                    gs_gui_panel_begin(gui, "##image");
+                        gs_gui_layout_row(gui, 1, (int[]){-1}, -1);
+                        gs_gui_image_ex(gui, *title_bg, gs_v2s(0.f), gs_v2s(1.f), 
+                            &(gs_gui_selector_desc_t){.classes = {"title_bg"}}, GS_GUI_OPT_NOINTERACT);
+                    gs_gui_panel_end(gui);
+                }
+
+                // Do vignette overlay
+                {
+                    const int32_t off = 30;
+                    anchor = gs_gui_layout_anchor(&cnt->rect, cnt->rect.w + off * 2 + 10.f, 
+                            cnt->rect.h + off * 2 + 10.f, -off, -off, GS_GUI_LAYOUT_ANCHOR_CENTER);
+                    gs_gui_layout_set_next(gui, anchor, 0);
+                    gs_gui_panel_begin(gui, "##vignette");
+                        gs_gui_layout_row(gui, 1, (int[]){-1}, -1);
+                        gs_gui_image_ex(gui, *vignette, gs_v2s(0.f), gs_v2s(1.f), 
+                            &(gs_gui_selector_desc_t){.classes = {"title_vin"}}, GS_GUI_OPT_NOINTERACT);
+                    gs_gui_panel_end(gui);
+                }
+
+                gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, cnt->body.w * 0.8f, 300, 0, 0, GS_GUI_LAYOUT_ANCHOR_CENTER);
+                gs_gui_layout_set_next(gui, anchor, 0);
+                gs_gui_panel_begin_ex(gui, "##title_screen", &(gs_gui_selector_desc_t){.classes = {"bsfpanel"}}, GS_GUI_OPT_NOSCROLL);
+                {
+                    switch (bsf->state)
+                    {
+                        default:                                                       break;
+                        case BSF_STATE_TITLE:       bsf_title_screen(bsf, &anchor);    break;
+                        case BSF_STATE_MAIN_MENU:   bsf_main_menu(bsf, &anchor);       break;
+                        case BSF_STATE_OPTIONS:     bsf_options_menu(bsf, &anchor);    break;
+                        case BSF_STATE_GAME_SETUP:  bsf_game_setup_menu(bsf, &anchor); break;
+                    }
+                }
+                gs_gui_panel_end(gui);
+
             } 
 
-            if (gs_gui_button(gui, "Play"))
-            {
-                bsf->state = BSF_STATE_START;
-                bsf->run.is_playing = true;
-            } 
+            gs_gui_window_end(gui);
 
-            gs_gui_textbox(gui, bsf->run.seed, BSF_SEED_MAX_LEN);
-
-        } break;
+        } break; 
 
         case BSF_STATE_PAUSE:
         {
+            gs_gui_window_begin_ex(gui, "##pause", gs_gui_rect(0, 0, 100, 100), NULL, NULL, opt); 
+
+			gs_gui_container_t* cnt = gs_gui_get_current_container(gui); 
+
             if (gs_platform_key_pressed(GS_KEYCODE_ESC)) 
             {
                 bsf->state = BSF_STATE_PLAY;
@@ -2368,24 +3116,11 @@ GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
             {
                 bsf->state = BSF_STATE_END;
             }
-        } break;
 
-        case BSF_STATE_OPTIONS: 
-        {
-            if (gs_platform_key_pressed(GS_KEYCODE_ESC))
-            {
-                if (bsf->run.is_playing) bsf->state = BSF_STATE_PAUSE;
-                else                     bsf->state = BSF_STATE_MAIN_MENU;
-            }
+            gs_gui_window_end(gui);
 
-            if (gs_gui_button(gui, "Back"))
-            { 
-                if (bsf->run.is_playing) bsf->state = BSF_STATE_PAUSE;
-                else                     bsf->state = BSF_STATE_MAIN_MENU;
-            } 
         } break;
     }
-    gs_gui_end_window(gui);
 } 
 
 //=== BSF Game ===//
@@ -2588,46 +3323,77 @@ static int32_t bsf_game_room_compare(void* cp0, void* cp1)
 GS_API_DECL void bsf_room_load(struct bsf_t* bsf, uint32_t cell)
 {
     // Unload previous room cell of items and mobs
-    bsf_room_t* room = gs_slot_array_iter_getp(bsf->run.rooms, bsf->run.cell); 
-    for (uint32_t i = 0; i < gs_dyn_array_size(room->mobs); ++i) {
-        ecs_delete(bsf->entities.world, room->mobs[i]);
+    for (
+        gs_slot_array_iter it = gs_slot_array_iter_new(bsf->run.rooms); 
+        gs_slot_array_iter_valid(bsf->run.rooms, it);
+        gs_slot_array_iter_advance(bsf->run.rooms, it)
+    )
+    {
+        bsf_room_t* room = gs_slot_array_iter_getp(bsf->run.rooms, it); 
+        for (uint32_t i = 0; i < gs_dyn_array_size(room->mobs); ++i) {
+            ecs_delete(bsf->entities.world, room->mobs[i]);
+        }
+        gs_dyn_array_clear(room->mobs);
     }
-    gs_dyn_array_clear(room->mobs);
 
     // Set new cell
     bsf->run.cell = cell;
 
     // Get new room to load
-    room = gs_slot_array_iter_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    bsf_room_t* room = gs_slot_array_iter_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Do not load room if already cleared
+    if (room->clear) {
+        return; 
+    }
+
     room->movement_type = BSF_MOVEMENT_RAIL; 
 
-    // Load a room template
-    gs_snprintfc(RT_FILE, 256, "%s/room_templates/room.rt", bsf->assets.asset_dir);
-    gs_byte_buffer_t buffer = gs_byte_buffer_new();
-    gs_byte_buffer_read_from_file(&buffer, RT_FILE);
-
-    gs_byte_buffer_readc(&buffer, uint16_t, ct);
-    for (uint32_t i = 0; i <  ct; ++i)
+    switch (room->type)
     { 
-        gs_byte_buffer_readc(&buffer, bsf_room_brush_t, brush);
-        switch (brush.type)
-        {
-            case BSF_ROOM_BRUSH_MOB: 
-            {
-                bsf_shape_type type = BSF_SHAPE_BOX;
-                ecs_entity_t e = bsf_mob_create(bsf, &brush.xform, type);
-                gs_dyn_array_push(room->mobs, e);
-            } break;
+        default: break; 
+        case BSF_ROOM_START: break;
+        case BSF_ROOM_ITEM: break;
+        case BSF_ROOM_SECRET: break;
+        case BSF_ROOM_SHOP: break;
+        case BSF_ROOM_BOSS: break;
 
-            case BSF_ROOM_BRUSH_ITEM:
-            {
-                bsf_item_type type = gs_rand_gen_range_long(&bsf->run.rand, 0, BSF_ITEM_COUNT - 1);
-                ecs_entity_t e = bsf_item_create(bsf, &brush.xform, type);
-            } break;
-        } 
-    } 
+        case BSF_ROOM_DEFAULT:
+        { 
+            // Load a room template
+            gs_snprintfc(RT_FILE, 256, "%s/room_templates/room.rt", bsf->assets.asset_dir);
+            gs_byte_buffer_t buffer = gs_byte_buffer_new();
+            gs_byte_buffer_read_from_file(&buffer, RT_FILE);
 
-    gs_byte_buffer_free(&buffer);
+            // Generate new seeded rand for items
+            gs_mt_rand_t item_rand = gs_rand_seed(bsf->run.rand.mt[32] + bsf->run.cell);
+
+            gs_byte_buffer_readc(&buffer, uint16_t, ct);
+            for (uint32_t i = 0; i < ct; ++i)
+            { 
+                gs_byte_buffer_readc(&buffer, bsf_room_brush_t, brush);
+                switch (brush.type)
+                {
+                    case BSF_ROOM_BRUSH_MOB: 
+                    {
+                        bsf_mob_type type = BSF_MOB_BANDIT;
+                        ecs_entity_t e = bsf_mob_create(bsf, &brush.xform, type);
+                        gs_dyn_array_push(room->mobs, e);
+                    } break;
+
+                    case BSF_ROOM_BRUSH_ITEM:
+                    {
+                        uint64_t v = gs_rand_gen_long(&item_rand);
+                        bsf_item_type type = v % (uint64_t)BSF_ITEM_COUNT;
+                        ecs_entity_t e = bsf_item_create(bsf, &brush.xform, type);
+                    } break;
+                } 
+            } 
+
+            gs_byte_buffer_free(&buffer);
+        } break; 
+    }
+
 }
 
 static void bsf_game_level_gen(struct bsf_t* bsf)
@@ -2801,6 +3567,22 @@ static void bsf_game_level_gen(struct bsf_t* bsf)
     gs_dyn_array_free(dead_ends);
 } 
 
+void bsf_game_add_room_entity(struct bsf_t* bsf)
+{ 
+    // Add entity for room
+    ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
+
+    ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
+        .shape = BSF_SHAPE_ROOM,
+        .model = gs_mat4_identity(),
+        .color = GS_COLOR_WHITE
+    });
+
+    ecs_set(bsf->entities.world, e, bsf_component_transform_t, {
+        .xform = gs_vqs_default()
+    });
+}
+
 GS_API_DECL void bsf_game_start(struct bsf_t* bsf) 
 { 
 	// Initialize entities
@@ -2820,6 +3602,9 @@ GS_API_DECL void bsf_game_start(struct bsf_t* bsf)
 
     // Initialize world based on seed
     bsf_game_level_gen(bsf);
+
+    // Add room entity
+    bsf_game_add_room_entity(bsf);
 
     gs_platform_lock_mouse(gs_platform_main_window(), true);
 
@@ -2859,7 +3644,7 @@ void gui_cb(gs_gui_context_t* ctx, gs_gui_customcommand_t* cmd)
     gsi_vattr_list_mesh(gsi, pip->mesh_layout, gs_dyn_array_size(pip->mesh_layout) * sizeof(gs_gfxt_mesh_layout_t)); 
     gsi_push_matrix(gsi, GSI_MATRIX_MODELVIEW);
     gsi_translatev(gsi, gs_v3(1.f, 0.f, -1.f));
-    gsi_rotatefv(gsi, t * 0.001f, GS_YAXIS);
+    gsi_rotatev(gsi, t * 0.001f, GS_YAXIS);
     gsi_box(gsi, 0.f, 0.f, 0.f, 0.5f, 0.5f, 0.5f, col.r, col.g, col.b, col.a, pip->desc.raster.primitive);
     gs_mat4 mvp = gsi_get_mvp_matrix(gsi); 
     gsi_pop_matrix_ex(gsi, false); 
@@ -2878,6 +3663,9 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
     gs_gui_context_t* gui = &bsf->gs.gui;
 	gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
 	const float t = gs_platform_elapsed_time() * 0.001f;
+    const float dt = gs_platform_delta_time();
+    const float frame = gs_platform_time()->frame;
+    bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
 
     if ((bsf->dbg && gs_platform_mouse_down(GS_MOUSE_RBUTTON)) || !bsf->dbg)
     {
@@ -2923,6 +3711,26 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
     // Update entity world
     ecs_progress(bsf->entities.world, 0);
 
+    // If all mobs cleared from room, then clear it
+    static bool just_cleared_room = false;
+    static float clear_timer = 0.f;
+    const float time_max = 5.f;
+    if (gs_dyn_array_empty(room->mobs) || gs_platform_key_pressed(GS_KEYCODE_C))
+    {
+        room->clear = true;
+
+        if (!just_cleared_room)
+        {
+            just_cleared_room = true;
+            clear_timer = time_max;
+        } 
+    }
+    else
+    {
+        just_cleared_room = false;
+        clear_timer = 0.f;
+    }
+
     // UI 
 	int32_t opt = GS_GUI_OPT_NOBRINGTOFRONT |
 				  GS_GUI_OPT_NOINTERACT | 
@@ -2934,7 +3742,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                   GS_GUI_OPT_FORCESETRECT |
 				  GS_GUI_OPT_NODOCK;
 
-    gs_gui_begin_window_ex(gui, "#ui_canvas", gs_gui_rect(0, 0, 0, 0), NULL, opt);
+    gs_gui_window_begin_ex(gui, "#ui_canvas", gs_gui_rect(0, 0, 0, 0), NULL, NULL, opt);
     { 
         gs_gui_container_t* cnt = gs_gui_get_current_container(gui);
 
@@ -2945,12 +3753,22 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
 
             char TMP[256] = {0};
 
-            gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, 200, 30, 10, 0, GS_GUI_LAYOUT_ANCHOR_TOPLEFT);
+            gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, 350, 30, 10, 0, GS_GUI_LAYOUT_ANCHOR_TOPLEFT);
+            gs_gui_layout_set_next(gui, anchor, 0); 
+            gs_gui_layout_row(gui, 1, (int16_t[]){-1}, 0); 
+            gs_gui_label(gui, "bombs: %zu, health: %.2f, fps: %.2f", ic->bombs, hc->health, frame); 
+        }
+
+        // Clear message
+        if (clear_timer > 0.f)
+        {
+            float ct = gs_map_range(0.f, time_max, 0.f, 1.f, gs_max(clear_timer - 3.f, 0.f));
+            float yoff = gs_interp_smoothstep(-30, 30, 1.f - ct);
+            gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, 200, 30, 10, yoff, GS_GUI_LAYOUT_ANCHOR_TOPCENTER);
             gs_gui_layout_set_next(gui, anchor, 0); 
             gs_gui_layout_row(gui, 1, (int16_t[]){-1}, 0);
-
-            gs_snprintf(TMP, 256, "bombs: %zu, health: %.2f", ic->bombs, hc->health);
-            gs_gui_label(gui, TMP); // Need to make this take variable arguments
+            gs_gui_label(gui, "ROOM CLEARED");
+            clear_timer -= dt;
         }
 
         // Aim reticles
@@ -2959,7 +3777,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             {-20.f, 20.f, 1, 1},
             {-25.f, 15.f, 1, 2},
             {0, 0, 0}
-        }; 
+        };
 
         for (uint32_t i = 0; scls[i].can; ++i)
         {
@@ -3037,7 +3855,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             }
         }
     }
-    gs_gui_end_window(gui);
+    gs_gui_window_end(gui);
 
     if (bsf->dbg)
     { 
@@ -3051,8 +3869,10 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             mode == GS_GUI_TRANSFORM_LOCAL ? GS_GUI_TRANSFORM_WORLD : 
                 GS_GUI_TRANSFORM_LOCAL; 
 
+        gs_gui_set_style_sheet(gui, NULL);
+
         // Update debug gui
-        gs_gui_begin_window(gui, "#dbg", gs_gui_rect(100, 100, 350, 200));
+        gs_gui_window_begin(gui, "#dbg_window", gs_gui_rect(100, 100, 350, 200));
         {
             char TMP[256] = {0};
 
@@ -3070,6 +3890,28 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                 gs_gui_draw_custom(gui, dr, gui_cb, NULL, 0);
             }
 
+            gs_platform_input_t* input = &gs_subsystem(platform)->input;
+            if (gs_gui_treenode_begin(gui, "#controller")) 
+            {
+                gs_platform_gamepad_t* gp = &input->gamepads[0];
+                if (gp->present)
+                {
+                    char TMP[256] = {0};
+
+                    for (uint32_t i = 0; i < GS_PLATFORM_GAMEPAD_BUTTON_COUNT; ++i) {
+                        gs_snprintf(TMP, sizeof(TMP), "btn(%zu): %s", i, gp->buttons[i] ? "pressed" : "released");
+                        gs_gui_label(gui, TMP);
+                    }
+
+                    for (uint32_t i = 0; i < GS_PLATFORM_JOYSTICK_AXIS_COUNT; ++i) {
+                        gs_snprintf(TMP, sizeof(TMP), "axes(%zu): %.2f", i, gp->axes[i]);
+                        gs_gui_label(gui, TMP);
+                    }
+                } 
+
+                gs_gui_treenode_end(gui);
+            }
+
             gs_gui_layout_row(gui, 1, (int[]){-1}, 0);
             gs_snprintf(TMP, 64, "seed: %s", bsf->run.seed);
             gs_gui_label(gui, TMP); 
@@ -3083,10 +3925,23 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             GUI_LABEL("frame: %.2f", gs_subsystem(platform)->time.frame); 
 
             // Need automatic gui debug dumping
-            if (gs_gui_begin_treenode(gui, "#run"))
+            if (gs_gui_treenode_begin(gui, "#run"))
             {
                 gs_gui_layout_t* layout = gs_gui_get_layout(gui);
                 bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+                if (gs_gui_button(gui, "bandit"))
+                {
+                    bsf_mob_type type = BSF_MOB_BANDIT;
+                    gs_vqs xform = gs_vqs_default();
+                    xform.translation = gs_v3(
+                        gs_rand_gen_range(&bsf->run.rand, -20.f, 20.f),
+                        gs_rand_gen_range(&bsf->run.rand, -20.f, 20.f),
+                        gs_rand_gen_range(&bsf->run.rand, -20.f, 20.f)
+                    );
+                    ecs_entity_t e = bsf_mob_create(bsf, &xform, type);
+                    gs_dyn_array_push(room->mobs, e);
+                }
 
                 GUI_LABEL("level: %zu", bsf->run.level); 
                 GUI_LABEL("num_rooms: %zu", gs_slot_array_size(bsf->run.rooms)); 
@@ -3145,10 +4000,10 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                     }
                 }
 
-                gs_gui_end_treenode(gui);
+                gs_gui_treenode_end(gui);
             } 
 
-            if (gs_gui_begin_treenode(gui, "#player"))
+            if (gs_gui_treenode_begin(gui, "#player"))
             {
                 bsf_component_character_stats_t* psc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_character_stats_t);
                 gs_gui_layout_row(gui, 1, (int[]){-1}, 0); 
@@ -3169,10 +4024,10 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                 gs_gui_label(gui, "shot_speed: " );
                 gs_gui_number(gui, &psc->shot_speed, 0.1f); 
 
-                gs_gui_end_treenode(gui);
+                gs_gui_treenode_end(gui);
             }
         }
-        gs_gui_end_window(gui); 
+        gs_gui_window_end(gui); 
     } 
 }
 
@@ -3222,6 +4077,9 @@ GS_API_DECL void bsf_editor_start(struct bsf_t* bsf)
         gs_gui_dock_ex(gui, "Properties", "Outliner", GS_GUI_SPLIT_BOTTOM, 0.7f); 
         gs_gui_dock_ex(gui, "Debug", "Properties", GS_GUI_SPLIT_BOTTOM, 0.5f);
     }
+
+    // Set default style sheet
+    gs_gui_set_style_sheet(gui, NULL);
 }
 
 GS_API_DECL void bsf_editor_scene_cb(gs_gui_context_t* ctx, gs_gui_customcommand_t* cmd)
@@ -3308,14 +4166,14 @@ GS_API_DECL int32_t gs_gui_combo(gs_gui_context_t* ctx, const char* label, int32
                   GS_GUI_OPT_FORCESETRECT; 
 
     if (gs_gui_button(ctx, label)) {
-        gs_gui_open_popup(ctx, "#popup");
+        gs_gui_popup_open(ctx, "#popup");
     }
 
     int32_t ct = popup_max_height_in_items > 0 ? popup_max_height_in_items : items_count;
     gs_gui_rect_t rect = ctx->last_rect;
     rect.y += rect.h;
     rect.h = (ct + 1) * ctx->style_sheet->styles[GS_GUI_ELEMENT_BUTTON][0x00].size[1];
-    if (gs_gui_begin_popup_ex(ctx, "#popup", rect, opt))
+    if (gs_gui_popup_begin_ex(ctx, "#popup", rect, NULL, opt))
     {
         gs_gui_container_t* cnt = gs_gui_get_current_container(ctx);
         gs_gui_layout_row(ctx, 1, (int[]){-1}, 0);
@@ -3327,7 +4185,7 @@ GS_API_DECL int32_t gs_gui_combo(gs_gui_context_t* ctx, const char* label, int32
                 cnt->open = false;
             }
         }
-        gs_gui_end_popup(ctx);
+        gs_gui_popup_end(ctx);
     }
 
     return res;
@@ -3377,16 +4235,16 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
         GS_GUI_OPT_NOFOCUS | 
         GS_GUI_OPT_NORESIZE;
 
-    gs_gui_begin_window_ex(gui, "Dockspace", gs_gui_rect(350, 40, 600, 500), NULL, opt);
+    gs_gui_window_begin_ex(gui, "Dockspace", gs_gui_rect(350, 40, 600, 500), NULL, NULL, opt);
     {
         // Empty dockspace...
     }
-    gs_gui_end_window(gui);
+    gs_gui_window_end(gui);
 
-	gs_gui_begin_window_ex(gui, "Outliner", gs_gui_rect(0, 0, 300.f, 200.f), NULL, 0x00);
+	gs_gui_window_begin_ex(gui, "Outliner", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
-        gs_gui_begin_panel_ex(gui, "#panel", GS_GUI_OPT_NOTITLE);
+        gs_gui_panel_begin_ex(gui, "#panel", NULL, GS_GUI_OPT_NOTITLE | GS_GUI_OPT_NOSCROLLHORIZONTAL);
         {
             gs_gui_layout_row(gui, 2, (int[]){10, -1}, 0); 
             bool quit = false;
@@ -3411,11 +4269,11 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
                 }
             }
         }
-        gs_gui_end_panel(gui);
+        gs_gui_panel_end(gui);
     }
-	gs_gui_end_window(gui);
+	gs_gui_window_end(gui);
 
-	gs_gui_begin_window_ex(gui, "Properties", gs_gui_rect(0, 0, 300.f, 200.f), NULL, 0x00);
+	gs_gui_window_begin_ex(gui, "Properties", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
         if (!brush)
@@ -3471,9 +4329,9 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
             } 
         }
     }
-	gs_gui_end_window(gui);
+	gs_gui_window_end(gui);
 
-	gs_gui_begin_window_ex(gui, "Debug", gs_gui_rect(0, 0, 300.f, 200.f), NULL, 0x00);
+	gs_gui_window_begin_ex(gui, "Debug", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, 0); 
 
@@ -3544,9 +4402,9 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
             bsf->state = BSF_STATE_MAIN_MENU;
         }
     }
-	gs_gui_end_window(gui);
+	gs_gui_window_end(gui);
 
-	gs_gui_begin_window_ex(gui, "Scene", gs_gui_rect(0, 0, 500.f, 400.f), NULL, 0x00);
+	gs_gui_window_begin_ex(gui, "Scene", gs_gui_rect(0, 0, 500.f, 400.f), NULL, NULL, 0x00);
 	{ 
         gs_gui_layout_t* layout = gs_gui_get_layout(gui);
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
@@ -3633,7 +4491,7 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
         }
         
 	}
-	gs_gui_end_window(gui);
+	gs_gui_window_end(gui);
 }
 
 GS_API_DECL void bsf_editor_camera_update(struct bsf_t* bsf, bsf_camera_t* bcamera)
@@ -3679,8 +4537,635 @@ GS_API_DECL void bsf_editor_camera_update(struct bsf_t* bsf, bsf_camera_t* bcame
     }
 
     camera->transform.position = gs_vec3_add(camera->transform.position, gs_vec3_scale(gs_vec3_norm(vel), dt * bcamera->speed * mod));
+} 
+
+//=== BSF Test ===//
+
+// Want some test AI to run some sims with
+// Make it so this simple AI will find a random location then wander to it, but if the camera(target) is 
+// close enough, then the ai will chase. 
+// If the target gets far enough or the AI's health gets lowered enough, it will then flee.
+// Actions: 
+//  * Move
+//  * Chase
+//  * Flee
+//  * Heal
+typedef struct
+{
+    float health;
+    gs_vqs xform;
+    gs_vqs target;
+    gs_vqs player;
+} bsf_test_ai_ctx_t;
+
+enum
+{
+    BSF_TEST_AI_ACTION_MOVE = 0x00,
+    BSF_TEST_AI_ACTION_FLEE, 
+    BSF_TEST_AI_ACTION_CHASE,
+    BSF_TEST_AI_ACTION_COUNT
+};
+
+#define BSF_TEST_WORLD_SIZE  50
+
+static bsf_test_init = false;
+static bsf_test_ai_ctx_t bsf_test_ai_ctx = {0}; 
+static gs_ai_utility_action_desc_t s_actions[BSF_TEST_AI_ACTION_COUNT] = {0};
+
+GS_API_DECL void bsf_test_scene_cb(gs_gui_context_t* ctx, gs_gui_customcommand_t* cmd) 
+{
+    bsf_t* bsf = gs_user_data(bsf_t); 
+    gs_immediate_draw_t* gsi = &ctx->gsi;
+    const float t = gs_platform_elapsed_time(); 
+	const gs_gui_rect_t vp = cmd->viewport;
+	const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+
+	gsi_defaults(gsi);
+    gsi_camera(gsi, &bsf->scene.camera.cam, (uint32_t)vp.w, (uint32_t)vp.h); 
+    gs_graphics_set_viewport(&gsi->commands, vp.x, fbs.y - vp.h - vp.y, vp.w, vp.h); 
+    gsi_depth_enabled(gsi, true);
+
+    gsi_push_matrix(gsi, GSI_MATRIX_MODELVIEW);
+        gsi_mul_matrix(gsi, gs_vqs_to_mat4(&bsf_test_ai_ctx.xform));
+        gsi_box(gsi, 0.f, 0.f, 0.f, 0.5f, 0.5f, 0.5f, 255, 255, 255, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+    gsi_pop_matrix(gsi);
+
+    gsi_push_matrix(gsi, GSI_MATRIX_MODELVIEW);
+        gsi_mul_matrix(gsi, gs_vqs_to_mat4(&bsf_test_ai_ctx.target));
+        gsi_box(gsi, 0.f, 0.f, 0.f, 0.5f, 0.5f, 0.5f, 255, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+    gsi_pop_matrix(gsi);
+
+    gsi_push_matrix(gsi, GSI_MATRIX_MODELVIEW);
+        gsi_mul_matrix(gsi, gs_vqs_to_mat4(&bsf_test_ai_ctx.player));
+        gsi_box(gsi, 0.f, 0.f, 0.f, 0.5f, 0.5f, 0.5f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+    gsi_pop_matrix(gsi);
+
+    // Draw ground plane 
+    gsi_rect3Dv(gsi, gs_v3(-BSF_TEST_WORLD_SIZE, 0.f, -BSF_TEST_WORLD_SIZE), 
+            gs_v3(BSF_TEST_WORLD_SIZE, 0.f, BSF_TEST_WORLD_SIZE), gs_v2s(0.f), gs_v2s(1.f), gs_color(50, 50, 50, 255), GS_GRAPHICS_PRIMITIVE_TRIANGLES);
+} 
+
+void bsf_test_ai_move_action(struct bsf_t* bsf)
+{
+    // If dist to target within range, find new random target 
+    float dist_to_target = gs_vec3_dist(bsf_test_ai_ctx.xform.translation, bsf_test_ai_ctx.target.translation); 
+    if (dist_to_target <= 1.f)
+    {
+        gs_mt_rand_t rand = gs_rand_seed(time(NULL));
+        bsf_test_ai_ctx.target.translation = gs_v3( 
+            (float)gs_rand_gen_range(&rand, -BSF_TEST_WORLD_SIZE, BSF_TEST_WORLD_SIZE),
+            0.5f,
+            (float)gs_rand_gen_range(&rand, -BSF_TEST_WORLD_SIZE, BSF_TEST_WORLD_SIZE)
+        );
+    }
+
+    // Move towards target
+    gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(bsf_test_ai_ctx.target.translation, bsf_test_ai_ctx.xform.translation));
+    bsf_test_ai_ctx.xform.translation = gs_vec3_add(bsf_test_ai_ctx.xform.translation, gs_vec3_scale(dir, 0.01f));
 }
 
+void bsf_test_ai_flee_action(struct bsf_t* bsf)
+{
+    // Move quickly away from player
+    gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation));
+    bsf_test_ai_ctx.xform.translation = gs_vec3_add(bsf_test_ai_ctx.xform.translation, gs_vec3_scale(dir, -0.08f));
+}
+
+void bsf_test_ai_chase_action(struct bsf_t* bsf)
+{
+    // If dist to target within range, find new random target 
+    float dist_to_target = gs_vec3_dist(bsf_test_ai_ctx.xform.translation, bsf_test_ai_ctx.player.translation); 
+    if (dist_to_target > 1.f)
+    {
+        // Move towards player
+        gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation));
+        bsf_test_ai_ctx.xform.translation = gs_vec3_add(bsf_test_ai_ctx.xform.translation, gs_vec3_scale(dir, 0.05f));
+    } 
+}
+
+void bsf_test_ai_heal_action(struct bsf_t* bsf)
+{
+    bsf_test_ai_ctx.health = gs_clamp(bsf_test_ai_ctx.health + 0.01f, 0.f, 100.f);
+}
+
+typedef void (* bsf_ai_action_func)(struct bsf_t*);
+
+typedef struct
+{
+    const char* name;
+    bsf_ai_action_func f;
+    float score;
+} bsf_ai_action_t; 
+
+enum
+{
+    BSF_AI_ACTION_MOVE = 0x00,
+    BSF_AI_ACTION_CHASE, 
+    BSF_AI_ACTION_FLEE,
+    BSF_AI_ACTION_HEAL,
+    BSF_AI_ACTION_COUNT
+};
+
+int32_t bsf_ai_action_sort(const void* s0, const void* s1)
+{
+    return ((bsf_ai_action_t*)s0)->score < ((bsf_ai_action_t*)s1)->score;
+} 
+
+void bsf_test_ai_scene_update(struct bsf_t* bsf)
+{
+    bsf_ai_action_t actions[BSF_AI_ACTION_COUNT] = { 
+        {.name = "move", .f = bsf_test_ai_move_action}, 
+        {.name = "chase", .f = bsf_test_ai_chase_action}, 
+        {.name = "flee", .f = bsf_test_ai_flee_action},
+        {.name = "heal", .f = bsf_test_ai_heal_action}
+    };
+
+    float dist_to_player = gs_vec3_dist(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation);
+
+    actions[BSF_AI_ACTION_MOVE].score = gs_ai_utility_action_evaluate(&(gs_ai_utility_action_desc_t){
+       .considerations = (gs_ai_utility_consideration_desc_t[]){
+            {
+                .data = gs_vec3_dist(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation),
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,   // At 30 units distance
+                    .exponent = 2.f,
+                    .shift_x = -0.4f,
+                    .shift_y = 0.f
+                }
+            },
+            {
+                .data = bsf_test_ai_ctx.health,
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,
+                    .exponent = 8.f
+                }
+            }
+
+       },
+       .size = sizeof(gs_ai_utility_consideration_desc_t) * 2
+    });
+
+    actions[BSF_AI_ACTION_CHASE].score = gs_ai_utility_action_evaluate(&(gs_ai_utility_action_desc_t){
+       .considerations = (gs_ai_utility_consideration_desc_t[]){
+            {
+                .data = dist_to_player,
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f, 
+                    .exponent = 2.f,
+                    .shift_x = 1.01f
+                }
+            },
+            {
+                .data = bsf_test_ai_ctx.health,
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,
+                    .exponent = 8.f
+                }
+            }
+       },
+       .size = sizeof(gs_ai_utility_consideration_desc_t) * 2
+    }); 
+
+    actions[BSF_AI_ACTION_FLEE].score = gs_ai_utility_action_evaluate(&(gs_ai_utility_action_desc_t){
+       .considerations = (gs_ai_utility_consideration_desc_t[]){
+            {
+                .data = gs_vec3_dist(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation),
+                .min = 0.f, 
+                .max = 50.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,
+                    .exponent = 2.f,
+                    .shift_x = -1.1f
+                }
+            },
+            {
+                .data = bsf_test_ai_ctx.health,
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_logit, 
+                    .slope = 0.4f,
+                    .exponent = -2.5f,
+                    .shift_x = -1.f,
+                    .shift_y = -0.8f
+                }
+            }
+       },
+       .size = sizeof(gs_ai_utility_consideration_desc_t) * 2
+    }); 
+
+    actions[BSF_AI_ACTION_HEAL].score = gs_ai_utility_action_evaluate(&(gs_ai_utility_action_desc_t){
+       .considerations = (gs_ai_utility_consideration_desc_t[]){
+            {
+                .data = gs_vec3_dist(bsf_test_ai_ctx.player.translation, bsf_test_ai_ctx.xform.translation),
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,
+                    .exponent = 2.f,
+                    .shift_x = 1.f
+                }
+            },
+            {
+                .data = bsf_test_ai_ctx.health,
+                .min = 0.f, 
+                .max = 100.f,
+                .curve = {
+                    .func = gs_ai_curve_linearquad, 
+                    .slope = 1.f,
+                    .exponent = 2.f,
+                    .shift_x = 1.49f,
+                    .shift_y = -0.1f
+                }
+            }
+       },
+       .size = sizeof(gs_ai_utility_consideration_desc_t) * 2
+    }); 
+
+    // Sort actions based on scores
+    qsort(actions, BSF_AI_ACTION_COUNT, sizeof(bsf_ai_action_t), bsf_ai_action_sort); 
+
+    // Call primary action
+    actions[0].f(bsf);
+
+    gs_timed_action(60, {
+        gs_println("dtp: %.2f, %s: %.2f, %s: %.2f, %s: %.2f, %s: %.2f", dist_to_player, 
+            actions[BSF_AI_ACTION_MOVE].name, actions[BSF_AI_ACTION_MOVE].score, 
+            actions[BSF_AI_ACTION_CHASE].name, actions[BSF_AI_ACTION_CHASE].score, 
+            actions[BSF_AI_ACTION_FLEE].name, actions[BSF_AI_ACTION_FLEE].score,
+            actions[BSF_AI_ACTION_HEAL].name, actions[BSF_AI_ACTION_HEAL].score 
+        );
+    });
+}
+
+
+void bsf_bt_leaf_health_check(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{ 
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data;
+    if (data->health <= 50) node->state = GS_AI_BT_STATE_SUCCESS; 
+    else                    node->state = GS_AI_BT_STATE_FAILURE;
+}
+
+void bsf_bt_leaf_player_distance_check(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data;
+    float dist = gs_vec3_dist(data->xform.translation, data->player.translation);
+    if (dist <= 40) node->state = GS_AI_BT_STATE_SUCCESS;
+    else            node->state = GS_AI_BT_STATE_FAILURE;
+}
+
+void bsf_bt_leaf_player_distance_inv_check(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data;
+    float dist = gs_vec3_dist(data->xform.translation, data->player.translation);
+    if (dist > 40) node->state = GS_AI_BT_STATE_SUCCESS;
+    else           node->state = GS_AI_BT_STATE_FAILURE;
+}
+
+void bsf_bt_leaf_move_away_from_player(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data;
+    gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(data->xform.translation, data->player.translation));
+    data->xform.translation = gs_vec3_add(data->xform.translation, gs_vec3_scale(dir, 0.05f));
+    float dist_to_target = gs_vec3_dist(data->xform.translation, data->player.translation); 
+	if (dist_to_target <= 1.f) node->state = GS_AI_BT_STATE_SUCCESS;
+    else					   node->state = GS_AI_BT_STATE_RUNNING;
+} 
+
+void bsf_bt_leaf_move_towards_player(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data;
+    gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(data->xform.translation, data->player.translation));
+    data->xform.translation = gs_vec3_add(data->xform.translation, gs_vec3_scale(dir, -0.03f));
+    float dist_to_target = gs_vec3_dist(data->xform.translation, data->player.translation); 
+	if (dist_to_target <= 1.f) node->state = GS_AI_BT_STATE_SUCCESS;
+    else					   node->state = GS_AI_BT_STATE_RUNNING;
+} 
+
+void bsf_bt_leaf_find_target(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data; 
+    float dist_to_target = gs_vec3_dist(data->xform.translation, data->target.translation); 
+    if (dist_to_target <= 1.f) {
+        gs_mt_rand_t rand = gs_rand_seed(time(NULL));
+        data->target.translation = gs_v3( 
+            (float)gs_rand_gen_range(&rand, -BSF_TEST_WORLD_SIZE, BSF_TEST_WORLD_SIZE),
+            0.5f,
+            (float)gs_rand_gen_range(&rand, -BSF_TEST_WORLD_SIZE, BSF_TEST_WORLD_SIZE)
+        );
+    } 
+	node->state = GS_AI_BT_STATE_SUCCESS;
+}
+
+void bsf_bt_leaf_move_towards_target(struct gs_ai_bt_t* ctx, struct gs_ai_bt_node_t* node)
+{
+	const float dt = gs_platform_time()->delta;
+    bsf_test_ai_ctx_t* data = (bsf_test_ai_ctx_t*)ctx->ctx.user_data; 
+    float dist_to_target = gs_vec3_dist(data->xform.translation, data->target.translation); 
+    if (dist_to_target > 1.f) {
+		gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(data->target.translation, data->xform.translation));
+		gs_vec3 np = gs_vec3_add(data->xform.translation, gs_vec3_scale(dir, 10.f * dt));
+		data->xform.translation = gs_v3(
+			gs_interp_linear(data->xform.translation.x, np.x, 0.4f),
+			gs_interp_linear(data->xform.translation.y, np.y, 0.4f),
+			gs_interp_linear(data->xform.translation.z, np.z, 0.4f) 
+		);
+		node->state = GS_AI_BT_STATE_RUNNING;
+    } 
+	else node->state = GS_AI_BT_STATE_SUCCESS;
+} 
+
+void simulate_bt(gs_ai_bt_t* ctx)
+{
+	static uint32_t frame = 0;
+	frame++;
+	gs_ai_bt_begin(ctx);
+    {
+        if (gs_ai_bt_repeater_begin(ctx, NULL)) 
+        {
+            if (gs_ai_bt_parallel_begin(ctx))
+            {
+                // Distance check
+                if (gs_ai_bt_sequence_begin(ctx))
+                {
+                    gs_ai_bt_leaf(ctx, bsf_bt_leaf_player_distance_inv_check); // Need to invert this
+                    gs_ai_bt_sequence_end(ctx);
+                }
+
+                // Select action
+                if (gs_ai_bt_selector_begin(ctx))
+                { 
+                    // Flee
+                    if (gs_ai_bt_sequence_begin(ctx))
+                    {
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_health_check);
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_player_distance_check);
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_move_away_from_player);
+                        gs_ai_bt_sequence_end(ctx);
+                    }
+
+                    // Chase
+                    if (gs_ai_bt_sequence_begin(ctx))
+                    {
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_player_distance_check);
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_move_towards_player);
+                        gs_ai_bt_sequence_end(ctx);
+                    }
+
+                    // Move to Target
+                    if (gs_ai_bt_sequence_begin(ctx))
+                    {
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_find_target);
+                        gs_ai_bt_leaf(ctx, bsf_bt_leaf_move_towards_target);
+                        gs_ai_bt_sequence_end(ctx);
+                    }
+
+                    gs_ai_bt_selector_end(ctx);
+                }
+                gs_ai_bt_parallel_end(ctx);
+            }
+            gs_ai_bt_repeater_end(ctx);
+        }
+    }
+    gs_ai_bt_end(ctx);
+}
+
+GS_API_DECL void bsf_test(struct bsf_t* bsf)
+{ 
+    gs_command_buffer_t* cb = &bsf->gs.cb;
+    gs_immediate_draw_t* gsi = &bsf->gs.gsi;
+    gs_gui_context_t* gui = &bsf->gs.gui;
+
+	gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
+    const gs_platform_time_t* time = gs_platform_time();
+	const float t = time->elapsed * 0.001f;
+    const float dt = time->delta;
+    const float frame = time->frame; 
+
+    static gs_ai_bt_t bt = gs_default_val(); 
+
+    // Init if needed
+    if (!bsf_test_init)
+    { 
+        bsf_test_init = true;
+        gs_gui_dock_ex(gui, "Scene", "Dockspace", GS_GUI_SPLIT_BOTTOM, 1.f);
+        gs_gui_dock_ex(gui, "Options", "Scene", GS_GUI_SPLIT_RIGHT, 0.3f); 
+		bsf_camera_init(bsf, &bsf->scene.camera);
+        bsf->scene.camera.cam.transform.position = (gs_vec3){-0.59f, 2.24f, 2.31f};
+        bsf->scene.camera.cam.transform.rotation = (gs_quat){-0.17f, -0.07f, -0.01f, 0.98f};
+        bsf_test_ai_ctx = (bsf_test_ai_ctx_t){
+            .health = 100.f,
+            .xform = (gs_vqs){
+                .translation = gs_v3(0.f, 0.5f, 0.f),
+                .rotation = gs_quat_default(),
+                .scale = gs_v3s(1.f)
+            },
+            .target = (gs_vqs){
+                .translation = gs_v3(BSF_TEST_WORLD_SIZE * 0.2f, 0.5f, BSF_TEST_WORLD_SIZE * 0.3f),
+                .rotation = gs_quat_default(), 
+                .scale = gs_v3s(1.f)
+            },
+            .player = (gs_vqs) {
+                .translation = gs_v3(BSF_TEST_WORLD_SIZE * 0.2f, 0.5f, -BSF_TEST_WORLD_SIZE * 0.8f),
+                .rotation = gs_quat_default(), 
+                .scale = gs_v3s(1.f)
+            }
+        }; 
+    }
+
+
+    if (gs_platform_mouse_down(GS_MOUSE_RBUTTON))
+    {
+        // Lock mouse at start by default
+        gs_platform_lock_mouse(gs_platform_main_window(), true);
+        bsf_editor_camera_update(bsf, &bsf->scene.camera);
+    }
+    else
+    {
+        // Lock mouse at start by default
+        gs_platform_lock_mouse(gs_platform_main_window(), false);
+    } 
+
+    // Update ai
+    // bsf_test_ai_scene_update(bsf); 
+
+    bt.ctx.user_data = &bsf_test_ai_ctx;
+	simulate_bt(&bt);
+
+    // Push default style
+    gs_gui_set_style_sheet(gui, NULL); 
+
+    int32_t opt = 
+        GS_GUI_OPT_NOCLIP | 
+        GS_GUI_OPT_NOFRAME | 
+        GS_GUI_OPT_FORCESETRECT | 
+        GS_GUI_OPT_NOTITLE | 
+        GS_GUI_OPT_DOCKSPACE | 
+        GS_GUI_OPT_FULLSCREEN | 
+        GS_GUI_OPT_NOMOVE | 
+        GS_GUI_OPT_NOBRINGTOFRONT | 
+        GS_GUI_OPT_NOFOCUS | 
+        GS_GUI_OPT_NORESIZE;
+
+    gs_gui_window_begin_ex(gui, "Dockspace", gs_gui_rect(350, 40, 600, 500), NULL, NULL, opt);
+    {
+        // Empty dockspace...
+    }
+    gs_gui_window_end(gui);
+
+    // Want a group of actions that can be possible, with their utility values, and then be able to adjust 
+    // these curves
+
+    gs_gui_window_begin_ex(gui, "Options", gs_gui_rect(350, 40, 600, 500), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
+    {
+        if (gs_gui_button(gui, "Exit"))
+        {
+            bsf->state = BSF_STATE_MAIN_MENU;
+            bsf_test_init = false; 
+        } 
+
+		// Curve parameters
+		static struct {float m; float k; float c; float b;} params = {0};
+        static uint32_t cf = 0; 
+
+		// Curve selections 
+        struct {const char* k; gs_ai_curve_func f;} curves[] = {
+            {"Linear/Quad", gs_ai_curve_linearquad},
+            {"Sin", gs_ai_curve_sin},
+            {"Cos", gs_ai_curve_cos},
+            {"Logistic", gs_ai_curve_logistic},
+            {"Logit", gs_ai_curve_logit},
+            {NULL}
+        };
+
+        // Try to draw a custom viewer for action response curves  
+		gs_gui_layout_t* layout = gs_gui_get_layout(gui);
+		float wh = gs_min(layout->body.w * 0.7f, layout->body.h * 0.7f);
+        gs_gui_layout_row(gui, 1, (int[]){-1}, wh);
+        gs_gui_panel_begin_ex(gui, "##curves", NULL, GS_GUI_OPT_NOSCROLL);
+        { 
+			layout = gs_gui_get_layout(gui);
+            gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
+            gs_gui_rect_t origin = gs_gui_layout_next(gui);
+
+            // Graph
+            uint32_t rows = 10, cols = 10;
+			float margin = 20.f;
+			float hm = margin * 0.5f;
+            float rstep = (origin.h - margin) / (float)rows;
+            float cstep = (origin.w - margin) / (float)cols;
+            for (uint32_t r = 0; r <= rows; ++r)
+            {
+                gs_vec2 s = gs_v2(origin.x + hm, origin.y + hm + r * rstep);
+                gs_vec2 e = gs_vec2_add(s, gs_v2(origin.w - margin, 0.f));
+                gs_gui_draw_line(gui, s, e, GS_COLOR_WHITE);
+
+                for (uint32_t c = 0; c <= cols; ++c)
+                {
+                    s = gs_v2(origin.x + hm + c * cstep, origin.y + hm);
+                    e = gs_vec2_add(s, gs_v2(0.f, origin.h - margin));
+                    gs_gui_draw_line(gui, s, e, GS_COLOR_WHITE);
+                } 
+            } 
+
+            gs_gui_rect_t clip = gs_gui_rect(layout->body.x + hm, layout->body.y + hm, layout->body.w - margin, layout->body.h - margin);
+            gs_gui_push_clip_rect(gui, clip);
+            gs_gui_set_clip(gui, clip);
+
+            float xstep = 0.005f;
+			float w = layout->body.w - margin;
+			float h = layout->body.h - margin;
+            gs_vec2 o = gs_v2(origin.x + hm, origin.y + h + hm);
+            for (float x = -2.f; x <= 2.f; x += xstep)
+            {
+				float x0 = x;
+				float x1 = x + xstep;
+                float y0 = curves[cf].f(params.m, params.k, params.c, params.b, x0);
+                float y1 = curves[cf].f(params.m, params.k, params.c, params.b, x1); 
+                gs_vec2 s = gs_v2(o.x + x * w, o.y - y0 * h);
+                gs_vec2 e = gs_v2(o.x + (x + xstep) * w, o.y - y1 * h);
+                gs_gui_draw_line(gui, s, e, GS_COLOR_RED);
+            }
+
+            gs_gui_pop_clip_rect(gui);
+            gs_gui_set_clip(gui, gs_gui_unclipped_rect);
+        }
+        gs_gui_panel_end(gui); 
+
+		layout = gs_gui_get_layout(gui);
+
+		// Parameters: m, k, c, b
+		struct {const char* k; float* v;} parameters[] = {
+			{"m: ", &params.m}, 
+			{"k: ", &params.k},
+			{"c: ", &params.c},
+			{"b: ", &params.b},
+			{NULL}
+		};
+		int32_t lw = layout->body.w * 0.05f;
+		int32_t sw = (int32_t)((layout->body.w / 4.f) - lw);
+		gs_gui_layout_row(gui, 2 * 4, (int[]){lw, sw, lw, sw, lw, sw, lw, sw}, 0); 
+		for (uint32_t p = 0; parameters[p].k; ++p)
+		{
+			gs_gui_label(gui, parameters[p].k);
+			gs_gui_number(gui, parameters[p].v, 0.01f);
+		}
+
+        gs_gui_layout_row(gui, 1, (int[]){-1}, 0);
+        if (gs_gui_combo_begin_ex(gui, "##curves", curves[cf].k, 5, NULL, 0x00))
+        {
+            gs_gui_layout_row(gui, 1, (int[]){-1}, 0); 
+            for (uint32_t c = 0; curves[c].k; ++c)
+            {
+                if (gs_gui_button(gui, curves[c].k)) {
+                    cf = c;
+                } 
+            }
+
+            gs_gui_combo_end(gui);
+        } 
+
+		gs_gui_layout_row(gui, 2, (int[]){50, 150}, 0); 
+        gs_gui_label(gui, "health: ");
+        gs_gui_number(gui, &bsf_test_ai_ctx.health, 0.1f);
+
+        static int32_t checked = 0;
+        gs_gui_layout_row(gui, 1, (int[]){-1}, 0);
+        gs_gui_checkbox(gui, "blah", &checked); 
+
+        gs_gui_label(gui, "frame: %.3fms", time->frame);
+
+    }
+    gs_gui_window_end(gui);
+
+    gs_gui_window_begin(gui, "Scene", gs_gui_rect(350, 40, 600, 500));
+    {
+        // Set layout for full windowed rect
+        gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
+        gs_gui_rect_t rect = gs_gui_layout_next(gui);
+        gs_gui_layout_set_next(gui, rect, 0);
+
+        // Scene
+         gs_gui_draw_custom(gui, rect, bsf_test_scene_cb, NULL, 0);
+
+        gs_gui_gizmo(gui, &bsf->scene.camera, &bsf_test_ai_ctx.player, 0.f, 0x00, 0x00, GS_GUI_OPT_LEFTCLICKONLY);
+    }
+    gs_gui_window_end(gui);
+}
 
 
 
