@@ -1,0 +1,56 @@
+pipeline { 
+
+    raster 
+    { 
+        primitive: QUADS
+        index_buffer_element_size: UINT16
+    },
+
+    depth 
+    {
+        func: LEQUAL
+    }, 
+
+    shader { 
+    
+        vertex { 
+
+            attributes { 
+                FLOAT3 : a_pos
+            }, 
+
+            uniforms {
+                mat4 u_mvp;
+            },
+
+            out {
+                vec3 uv;
+            },
+
+            code { 
+                void main() {
+                    uv = a_pos;
+                    vec4 pos = u_mvp * vec4(a_pos, 1.0);
+                    gl_Position = pos.xyww; 
+                }
+            }
+        },
+
+        fragment { 
+
+            uniforms {
+                samplerCube u_tex;
+            }, 
+            
+            out {
+                vec4 frag_color;
+            },
+
+            code {
+                void main() {
+                    frag_color = vec4(texture(u_tex, uv).rgb, 1.0);
+                }
+            }
+        } 
+    } 
+} 

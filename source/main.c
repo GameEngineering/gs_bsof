@@ -1,5 +1,4 @@
-/*================================================================
-
+/*================================================================ 
 	* Copyright: 2020 John Jackson
 	* File: main.c 
 	All Rights Reserved
@@ -52,6 +51,8 @@
 
     Enemies:
         - Number? Types?
+        - Bandit
+        - Turret
 
     Bosses: 
         - Single boss? Two bosses?
@@ -78,7 +79,7 @@
         - UI
         - Various obstacles/props
         - Construct more room templates
-        - Make it look nice...
+        - Make it look nice...This is priority right now
         - Room navigation
 
 =================================================================*/
@@ -109,6 +110,9 @@
 #define BSF_ROOM_MAX_COLS   9
 #define BSF_ROOM_MAX_ROWS   8
 #define BSF_ROOM_MAX        (BSF_ROOM_MAX_ROWS * BSF_ROOM_MAX_COLS)
+#define BSF_ROOM_BOUND_X    25.f
+#define BSF_ROOM_BOUND_Y    25.f
+#define BSF_ROOM_BOUND_Z    100.f 
 
 // Forward decls.
 struct bsf_t;
@@ -234,15 +238,24 @@ typedef struct
     gs_vec3 angular_velocity;
 } bsf_component_camera_track_t;
 
+enum 
+{
+    BSF_PROJECTILE_OPT_HOMING = (1 << 0), 
+    BSF_PROJECTILE_OPT_HOMING_BOMB = (1 << 1)
+};
+
 typedef struct
 {
-    uint32_t health;    
+    float health;    
     float speed;            
     float fire_rate;
     float damage;
     float range;
     float shot_speed;
     float luck;
+    float shot_size;
+    uint32_t shot_count;
+    uint32_t projectile_opt;
 } bsf_component_character_stats_t;
 
 typedef struct
@@ -253,7 +266,7 @@ typedef struct
     int16_t vel_dir;
     float avz;
     float max_time;
-} bsf_component_barrel_roll_t; 
+} bsf_component_barrel_roll_t;
 
 typedef struct
 {
@@ -291,7 +304,23 @@ typedef struct
 {
     int16_t firing;
     float time;
-} bsf_component_gun_t;
+} bsf_component_gun_t; 
+
+typedef enum 
+{
+    BSF_MOB_BANDIT = 0x00,
+    BSF_MOB_TURRET,
+    BSF_MOB_BOSS,
+    BSF_MOB_COUNT
+} bsf_mob_type;
+
+typedef struct 
+{
+    bsf_mob_type type;
+} bsf_component_mob_t; 
+
+GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, ecs_world_t* world, gs_vqs* xform, bsf_mob_type type);
+GS_API_DECL void bsf_mob_system(ecs_iter_t* it); 
 
 typedef struct
 {
@@ -308,47 +337,76 @@ typedef struct
     bsf_component_health_t* hc;
     bsf_component_transform_t* ptc; // Player transform component
     bsf_component_ai_t* ac;
+    bsf_component_mob_t* mc;
     ecs_world_t* world;
     ecs_entity_t mob;
 } bsf_ai_data_t;
 
-typedef enum 
+typedef enum
 {
-    BSF_MOB_BOX = 0x00,
-    BSF_MOB_SPHERE, 
-    BSF_MOB_CONE,
-    BSF_MOB_BANDIT
-} bsf_mob_type;
-
-typedef struct 
-{
-    bsf_mob_type type;
-} bsf_component_mob_t; 
-
-GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mob_type type);
-GS_API_DECL void bsf_mob_system(ecs_iter_t* it); 
+    BSF_CONSUMABLE_HEALTH = 0x00,
+    BSF_CONSUMABLE_BOMB,
+    BSF_CONSUMABLE_COUNT 
+} bsf_consumable_type;
 
 typedef enum
 {
-    BSF_ITEM_HEALTH = 0x00,
-    BSF_ITEM_BOMB,
-    BSF_ITEM_COUNT
-} bsf_item_type; 
+    BSF_OBSTACLE_BUILDING = 0x00,
+    BSF_OBSTACLE_COUNT
+} bsf_obstacle_type;
 
 typedef struct
 {
+    bsf_obstacle_type type;
+} bsf_component_obstacle_t;
+
+GS_API_DECL ecs_entity_t bsf_obstacle_create(struct bsf_t* bsf, gs_vqs* xform, bsf_obstacle_type type);
+GS_API_DECL void bsf_obstacle_system(ecs_iter_t* it); 
+GS_API_DECL void bsf_obstacle_destroy(ecs_world_t* world, ecs_entity_t obstacle);
+
+// Three item types for now, one to increase all stats, one to give double shots, one to give larger bullets
+typedef enum
+{
+    BSF_ITEM_SAD_ONION = 0x00,      // Fire rate increase,
+    BSF_ITEM_INNER_EYE,             // Fire three shots, fire rate decrease significantly
+    BSF_ITEM_SPOON_BENDER,          // Homing shots,
+    BSF_ITEM_MAGIC_MUSHROOM,		// All stats up
+	BSF_ITEM_DEAD_ONION,			// Shot size increase, Fire rate decrease
+	BSF_ITEM_COUNT
+} bsf_item_type;
+
+GS_API_DECL void bsf_item_remove_from_pool(struct bsf_t* bsf, bsf_item_type type);
+
+typedef struct
+{
+    bsf_consumable_type type;
+    gs_vqs origin;
+    float time_scale[3];
+} bsf_component_consumable_t;
+
+GS_API_DECL ecs_entity_t bsf_consumable_create(struct bsf_t* bsf, gs_vqs* xform, bsf_consumable_type type);
+GS_API_DECL void bsf_consumable_system(ecs_iter_t* it);
+GS_API_DECL void bsf_consumable_destroy(ecs_world_t* world, ecs_entity_t item);
+
+typedef struct
+{
+	float hit_timer;
+	b32 hit;
     bsf_item_type type;
     gs_vqs origin;
     float time_scale[3];
-} bsf_component_item_t;
+    uint32_t hit_count;
+} bsf_component_item_chest_t;
 
-GS_API_DECL ecs_entity_t bsf_item_create(struct bsf_t* bsf, gs_vqs* xform, bsf_item_type type);
-GS_API_DECL void bsf_item_system(ecs_iter_t* it);
+GS_API_DECL ecs_entity_t bsf_item_chest_create(struct bsf_t* bsf, gs_vqs* xform, bsf_item_type type);
+GS_API_DECL void bsf_item_chest_system(ecs_iter_t* it);
+GS_API_DECL void bsf_item_chest_destroy(ecs_world_t* world, ecs_entity_t item);
 
 typedef struct 
 {
     int16_t bombs;
-} bsf_component_inventory_t;
+    gs_dyn_array(bsf_item_type) items;
+} bsf_component_inventory_t; 
 
 ECS_COMPONENT_DECLARE(bsf_component_renderable_t);
 ECS_COMPONENT_DECLARE(bsf_component_renderable_immediate_t);
@@ -360,12 +418,14 @@ ECS_COMPONENT_DECLARE(bsf_component_timer_t);
 ECS_COMPONENT_DECLARE(bsf_component_mob_t);
 ECS_COMPONENT_DECLARE(bsf_component_gun_t);
 ECS_COMPONENT_DECLARE(bsf_component_health_t);
-ECS_COMPONENT_DECLARE(bsf_component_item_t);
+ECS_COMPONENT_DECLARE(bsf_component_consumable_t);
 ECS_COMPONENT_DECLARE(bsf_component_camera_track_t);
 ECS_COMPONENT_DECLARE(bsf_component_barrel_roll_t); 
 ECS_COMPONENT_DECLARE(bsf_component_explosion_t); 
 ECS_COMPONENT_DECLARE(bsf_component_inventory_t);
 ECS_COMPONENT_DECLARE(bsf_component_ai_t);
+ECS_COMPONENT_DECLARE(bsf_component_obstacle_t);
+ECS_COMPONENT_DECLARE(bsf_component_item_chest_t);
 
 //=== BSF Entities ===// 
 
@@ -400,6 +460,7 @@ enum
 GS_API_DECL void bsf_player_init(struct bsf_t* bsf);
 GS_API_DECL void bsf_player_system(ecs_iter_t* iter);
 GS_API_DECL void bsf_player_damage(struct bsf_t* bsf, ecs_world_t* world, float damage); 
+GS_API_DECL void bsf_player_consumable_pickup(struct bsf_t* bsf, ecs_world_t* world, bsf_consumable_type type);
 GS_API_DECL void bsf_player_item_pickup(struct bsf_t* bsf, ecs_world_t* world, bsf_item_type type);
 
 //=== BSF State ===//
@@ -437,6 +498,10 @@ GS_API_DECL void bsf_game_start(struct bsf_t* bsf);
 GS_API_DECL void bsf_game_end(struct bsf_t* bsf);
 GS_API_DECL void bsf_game_update(struct bsf_t* bsf);
 
+//=== BSF Audio ===//
+GS_API_DECL void bsf_play_sound(struct bsf_t* bsf, const char* key, float volume);
+GS_API_DECL void bsf_play_music(struct bsf_t* bsf, const char* key);
+
 //=== BSF Test ===//
 
 GS_API_DECL void bsf_test(struct bsf_t* bsf);
@@ -461,8 +526,12 @@ typedef struct
     bsf_room_type type;
     int16_t distance;                   // "Walking" distance from starting cell, used for dead end sorts
     gs_dyn_array(ecs_entity_t) mobs;    // Mobs for this room
-    b32 clear;                          // Whether or not this room is clear
+    gs_dyn_array(ecs_entity_t) obstacles;    // Mobs for this room
+    gs_dyn_array(ecs_entity_t) consumables;    // Consumable for this room
+    gs_dyn_array(ecs_entity_t) items;    // Consumable for this room
+    b32 cleared;                          // Whether or not this room is clear
     int16_t movement_type;
+    int16_t cell;
 } bsf_room_t; 
 
 GS_API_DECL void bsf_room_load(struct bsf_t* bsf, uint32_t cell);
@@ -473,8 +542,11 @@ typedef enum
 {
     BSF_ROOM_BRUSH_INVALID =  0x00,
     BSF_ROOM_BRUSH_MOB,
-    BSF_ROOM_BRUSH_ITEM,
+    BSF_ROOM_BRUSH_CONSUMABLE,
     BSF_ROOM_BRUSH_PROP,
+    BSF_ROOM_BRUSH_OBSTACLE,
+    BSF_ROOM_BRUSH_BANDIT,
+    BSF_ROOM_BRUSH_TURRET,
 } bsf_room_brush_type;
 
 typedef struct
@@ -486,9 +558,17 @@ typedef struct
 typedef struct 
 {
     gs_slot_array(bsf_room_brush_t) brushes;
+    char path[256];
 } bsf_room_template_t;
 
 //=== BSF Assets ===// 
+
+typedef struct 
+{
+    gs_handle(gs_graphics_vertex_buffer_t) vbo;
+    gs_handle(gs_graphics_index_buffer_t) ibo;
+    gs_gfxt_material_t* material;
+} bsf_model_t; 
 
 typedef struct {
     const char* asset_dir;
@@ -498,6 +578,10 @@ typedef struct {
     gs_hash_table(uint64_t, gs_gfxt_mesh_t)       meshes;
     gs_hash_table(uint64_t, gs_asset_font_t)      fonts;
     gs_hash_table(uint64_t, gs_gui_style_sheet_t) style_sheets;
+    gs_hash_table(uint64_t, gs_gfxt_texture_t)    cubemaps;
+    gs_hash_table(uint64_t, bsf_model_t)          models;
+    gs_hash_table(uint64_t, bsf_room_template_t)  room_templates;
+    gs_hash_table(uint64_t, gs_asset_audio_t)     sounds;
 } bsf_assets_t;
 
 GS_API_DECL void bsf_assets_init(struct bsf_t* bsf, bsf_assets_t* assets);
@@ -523,16 +607,22 @@ typedef struct bsf_t
         uint16_t level;                  // Current level
         gs_slot_array(bsf_room_t) rooms; // Rooms for current level
         uint32_t cell;                   // Current room cell (starts at (4, 4))
+        uint32_t boss;
         gs_mt_rand_t rand;
         float time_scale;
+        gs_dyn_array(bsf_item_type) item_pool;
     } run;
 
     struct {
         ecs_entity_t player;    // Main player
+        ecs_entity_t boss;      // Boss
         ecs_world_t* world;     // Main flecs entity world
     } entities;
 
     int16_t dbg;
+
+    // Music audio handle
+    gs_handle(gs_audio_instance_t) music;
 
 } bsf_t; 
 
@@ -551,7 +641,11 @@ void bsf_init()
     bsf->state = BSF_STATE_TITLE;
 
     // Initialize all asset data
-    bsf_assets_init(bsf, &bsf->assets); 
+    bsf_assets_init(bsf, &bsf->assets);
+
+    // Start playing title music
+    bsf->music.id = UINT32_MAX;
+    bsf_play_music(bsf, "audio.music_title");
 }
 
 void bsf_update()
@@ -609,6 +703,7 @@ void bsf_update()
         {
             // Just end the game for now...
             bsf_game_end(bsf);
+            bsf_play_music(bsf, "audio.music_title");
         } break;
 
         case BSF_STATE_QUIT:
@@ -655,10 +750,49 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
 {
     assets->asset_dir = gs_platform_dir_exists("./assets") ? "./assets" : "../assets";
 
+    // Room templates
+    struct {const char* key; const char* path;} room_templates[] = {
+        {.key = "rt.r0", .path = "room_templates/r0.rt"},
+        {.key = "rt.r1", .path = "room_templates/r1.rt"},
+        {.key = "rt.r2", .path = "room_templates/r2.rt"},
+        {.key = "rt.r3", .path = "room_templates/r3.rt"},
+        {.key = "rt.r4", .path = "room_templates/r4.rt"},
+        {.key = "rt.r5", .path = "room_templates/r5.rt"},
+        {.key = "rt.r6", .path = "room_templates/r6.rt"},
+        {.key = "rt.r7", .path = "room_templates/r7.rt"},
+        {.key = "rt.r8", .path = "room_templates/r8.rt"},
+        {.key = "rt.r9", .path = "room_templates/r9.rt"},
+        {NULL}
+    };
+
+    for (uint32_t i = 0; room_templates[i].key; ++i)
+    {
+        bsf_room_template_t rt = {0};
+        memcpy(rt.path, room_templates[i].path, 256);
+
+        gs_snprintfc(TMP, 256, "%s/%s", assets->asset_dir, room_templates[i].path); 
+        if (gs_platform_file_exists(TMP))
+        {
+            gs_byte_buffer_t buffer = gs_byte_buffer_new();
+            gs_byte_buffer_read_from_file(&buffer, TMP); 
+            gs_byte_buffer_readc(&buffer, uint16_t, ct); 
+            for (uint32_t i = 0; i < ct; ++i)
+            {
+                gs_byte_buffer_readc(&buffer, bsf_room_brush_t, br);
+                gs_slot_array_insert(rt.brushes, br);
+            }
+            gs_byte_buffer_free(&buffer);
+        }
+
+        gs_hash_table_insert(assets->room_templates, gs_hash_str64(room_templates[i].key), rt);
+    }
+
     struct {const char* key; const char* path;} pipelines[] = {
         {.key = "pip.simple", .path = "pipelines/simple.sf"},
+        {.key = "pip.hit", .path = "pipelines/hit.sf"},
         {.key = "pip.color", .path = "pipelines/color.sf"},
         {.key = "pip.gsi", .path = "pipelines/gsi.sf"},
+        {.key = "pip.skybox", .path = "pipelines/skybox.sf"},
         {NULL}
     };
 
@@ -674,7 +808,9 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         {.key = "mesh.arwing", .path = "meshes/arwing.gltf", .pip = "pip.simple"}, 
         {.key = "mesh.arwing64", .path = "meshes/arwing64.gltf", .pip = "pip.simple"}, 
         {.key = "mesh.bandit", .path = "meshes/bandit.gltf", .pip = "pip.simple"}, 
+        {.key = "mesh.turret", .path = "meshes/turret.gltf", .pip = "pip.simple"}, 
         {.key = "mesh.laser_player", .path = "meshes/laser_player.gltf", .pip = "pip.color"}, 
+        {.key = "mesh.brain", .path = "meshes/brain.gltf", .pip = "pip.simple"}, 
         {NULL} 
     };
 
@@ -705,7 +841,7 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
             .format = GS_GRAPHICS_TEXTURE_FORMAT_RGBA8,
             .min_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST,
             .mag_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST
-        }}, 
+        }},
         {NULL}
     };
 
@@ -715,11 +851,93 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         gs_hash_table_insert(assets->textures, gs_hash_str64(textures[i].key), gs_gfxt_texture_load_from_file(TMP, &textures[i].desc, false, false));
     }
 
+    // Add in default texture
+    gs_hash_table_insert(assets->textures, gs_hash_str64("tex.default"), gs_gfxt_texture_generate_default());
+
+    // Sounds
+    struct {const char* key; const char* path;} sounds[] = {
+        {"audio.laser", "sounds/arwing_laser.mp3"},
+        {"audio.laser2", "sounds/laser2.wav"},
+        {"audio.bang", "sounds/bang.mp3"},
+        {"audio.explosion", "sounds/explosion.mp3"},
+        {"audio.explosion_boss", "sounds/explosion_boss.mp3"},
+        {"audio.health_pickup", "sounds/pickup.mp3"},
+        {"audio.bomb_pickup", "sounds/bomb_pickup.mp3"},
+        {"audio.menu_select", "sounds/menu_select.mp3"},
+        {"audio.start", "sounds/start.mp3"},
+        {"audio.pause", "sounds/pause.mp3"},
+        {"audio.andross_tincan", "sounds/andross-tincan.mp3"},
+        {"audio.andross_dielikefather", "sounds/andross-dielikefather.mp3"},
+        {"audio.andross_lookforward", "sounds/andross-lookforward.mp3"},
+        {"audio.music_boss", "sounds/music_boss.mp3"},
+        {"audio.music_title", "sounds/music_title.mp3"},
+        {"audio.music_level", "sounds/music_level.mp3"},
+        {"audio.music_level_complete", "sounds/music_level_complete.mp3"},
+        {NULL}
+    };
+
+    for (uint32_t i = 0; sounds[i].key; ++i)
+    {
+        gs_snprintfc(TMP, 256, "%s/%s", assets->asset_dir, sounds[i].path);
+        gs_asset_audio_t snd = {0};
+        gs_asset_audio_load_from_file(TMP, &snd);
+        gs_hash_table_insert(assets->sounds, gs_hash_str64(sounds[i].key), snd);
+    }
+
+    struct {const char* key; const char* paths[6];} cmaps[] = {
+        {
+            .key = "cmap.skybox",
+            .paths = {
+                "textures/sky_back.jpg", 
+                "textures/sky_back.jpg", 
+                "textures/sky_top.jpg", 
+                "textures/sky_bottom.jpg", 
+                "textures/sky_back.jpg", 
+                "textures/sky_back.jpg"
+            }
+        },
+        {NULL}
+    };
+
+    for (uint32_t i = 0; cmaps[i].key; ++i) 
+    {
+        gs_graphics_texture_desc_t desc = { 
+            .type = GS_GRAPHICS_TEXTURE_CUBEMAP, 
+            .min_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST,
+            .mag_filter = GS_GRAPHICS_TEXTURE_FILTER_NEAREST,
+            .wrap_s = GS_GRAPHICS_TEXTURE_WRAP_CLAMP_TO_EDGE,
+            .wrap_t = GS_GRAPHICS_TEXTURE_WRAP_CLAMP_TO_EDGE,
+            .wrap_r = GS_GRAPHICS_TEXTURE_WRAP_CLAMP_TO_EDGE
+        };
+        uint32_t w = 0, h = 0, ncmps = 0;
+        for (uint32_t c = 0; c < 6; ++c)
+        {
+            uint32_t nc = 0;
+            gs_snprintfc(PATH, 256, "%s/%s", assets->asset_dir, cmaps[i].paths[c]);
+            gs_util_load_texture_data_from_file(PATH, &w, &h, &nc, &desc.data[c], false);
+            gs_assert(desc.data[c]);
+            if (c == 0) {
+                desc.height = h;
+                desc.width = w; 
+                ncmps = nc;
+                desc.format = ncmps == 3 ? GS_GRAPHICS_TEXTURE_FORMAT_RGB8 : GS_GRAPHICS_TEXTURE_FORMAT_RGBA8;
+            } else {
+                gs_assert(w == desc.width); 
+                gs_assert(h == desc.height);
+                gs_assert(nc == ncmps);
+            }
+        } 
+        // Create cubemap texture
+        gs_gfxt_texture_t cmap = gs_graphics_texture_create(&desc); 
+        gs_hash_table_insert(assets->cubemaps, gs_hash_str64(cmaps[i].key), cmap);
+    } 
+
     struct {const char* key; const char* pip;} materials[] = {
         {.key = "mat.simple", .pip = "pip.simple"},
         {.key = "mat.color", .pip = "pip.color"},
-        {.key = "mat.hit", .pip = "pip.simple"},
+        {.key = "mat.hit", .pip = "pip.hit"},
         {.key = "mat.gsi", .pip = "pip.gsi"},
+        {.key = "mat.skybox", .pip = "pip.skybox"},
         {NULL}
     };
 
@@ -731,7 +949,13 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
 
     struct {const char* key; const char* mat;} material_instances[] = {
         {.key = "mat.ship_arwing", .mat = "mat.simple"},
+        {.key = "mat.slave", .mat = "mat.simple"},
+        {.key = "mat.bandit", .mat = "mat.simple"},
+        {.key = "mat.turret", .mat = "mat.simple"},
         {.key = "mat.laser_player", .mat = "mat.color"},
+        {.key = "mat.laser_enemy", .mat = "mat.color"},
+        {.key = "mat.sky_sphere", .mat = "mat.color"},
+        {.key = "mat.brain", .mat = "mat.simple"},
         {NULL}
     }; 
 
@@ -760,6 +984,47 @@ GS_API_DECL void bsf_assets_init(bsf_t* bsf, bsf_assets_t* assets)
         gs_asset_font_t* font = gs_malloc_init(gs_asset_font_t); 
         gs_asset_font_load_from_file(TMP, font, fonts[i].pt);
         gs_hash_table_insert(bsf->gs.gui.font_stash, gs_hash_str64(fonts[i].key), font);
+    } 
+
+    // Skybox
+    {
+        // Vertex data for skybox
+        float v_data[] = {
+            -1.0f,  1.0f,  1.0f, 
+            -1.0f, -1.0f,  1.0f, 
+             1.0f, -1.0f,  1.0f,
+             1.0f,  1.0f,  1.0f, 
+            -1.0f,  1.0f, -1.0f, 
+            -1.0f, -1.0f, -1.0f, 
+             1.0f, -1.0f, -1.0f, 
+             1.0f,  1.0f, -1.0f 
+        };
+
+        uint16_t i_data[] = {
+           0, 1, 2, 3,
+           3, 2, 6, 7,
+           7, 6, 5, 4,
+           4, 5, 1, 0,
+           0, 3, 7, 4, // T
+           1, 2, 6, 5  // B
+        };
+
+        bsf_model_t skybox = {0}; 
+
+        // Skybox vbo/ibo
+        skybox.vbo = gs_graphics_vertex_buffer_create(&(gs_graphics_vertex_buffer_desc_t){
+            .data = v_data,
+            .size = sizeof(v_data)
+        });
+
+        skybox.ibo = gs_graphics_index_buffer_create(&(gs_graphics_index_buffer_desc_t){
+            .data = i_data, 
+            .size = sizeof(i_data)
+        });
+
+        skybox.material = gs_hash_table_getp(assets->materials, gs_hash_str64("mat.skybox"));
+
+        gs_hash_table_insert(assets->models, gs_hash_str64("models.skybox"), skybox);
     } 
 
     struct {const char* key; const char* path;} style_sheets[] = {
@@ -837,6 +1102,24 @@ GS_API_DECL void bsf_graphics_render(struct bsf_t* bsf)
                     gs_gfxt_material_bind_uniforms(cb, mat);
                     gs_gfxt_mesh_draw(cb, mesh); 
                 } 
+
+                // Render skybox
+                bsf_model_t* skybox = gs_hash_table_getp(bsf->assets.models, gs_hash_str64("models.skybox"));
+				gs_gfxt_texture_t* cmap = gs_hash_table_getp(bsf->assets.cubemaps, gs_hash_str64("cmap.skybox"));
+                gs_assert(skybox);
+				gs_assert(cmap);
+                gs_mat4 model = gs_mat4_scalev(gs_v3s(2000.f));
+                gs_mat4 mvp = gs_mat4_mul(vp, model);
+				gs_gfxt_material_set_uniform(skybox->material, "u_tex", cmap);
+                gs_gfxt_material_set_uniform(skybox->material, "u_mvp", &mvp);
+                gs_gfxt_material_bind(cb, skybox->material);
+                gs_gfxt_material_bind_uniforms(cb, skybox->material);
+                gs_graphics_bind_desc_t binds = {
+                    .vertex_buffers = {.desc = &(gs_graphics_bind_vertex_buffer_desc_t){.buffer = skybox->vbo}},
+                    .index_buffers = {.desc = &(gs_graphics_bind_index_buffer_desc_t){.buffer = skybox->ibo}}
+                };
+                gs_graphics_apply_bindings(cb, &binds);
+                gs_graphics_draw(cb, &(gs_graphics_draw_desc_t){.start = 0, .count = 36});
             } break;
         }
 
@@ -882,14 +1165,16 @@ GS_API_DECL void bsf_entities_init(struct bsf_t* bsf)
     ECS_REGISTER_COMP(bsf_component_mob_t); 
     ECS_REGISTER_COMP(bsf_component_renderable_immediate_t); 
     ECS_REGISTER_COMP(bsf_component_health_t); 
-    ECS_REGISTER_COMP(bsf_component_item_t); 
+    ECS_REGISTER_COMP(bsf_component_consumable_t); 
     ECS_REGISTER_COMP(bsf_component_gun_t); 
     ECS_REGISTER_COMP(bsf_component_character_stats_t);
     ECS_REGISTER_COMP(bsf_component_camera_track_t);
     ECS_REGISTER_COMP(bsf_component_barrel_roll_t);
     ECS_REGISTER_COMP(bsf_component_explosion_t);
     ECS_REGISTER_COMP(bsf_component_inventory_t);
-    ECS_REGISTER_COMP(bsf_component_ai_t);
+    ECS_REGISTER_COMP(bsf_component_ai_t); 
+    ECS_REGISTER_COMP(bsf_component_obstacle_t);
+    ECS_REGISTER_COMP(bsf_component_item_chest_t);
 
     // Register all systems 
 
@@ -951,11 +1236,11 @@ GS_API_DECL void bsf_entities_init(struct bsf_t* bsf)
 
     ECS_SYSTEM(
         bsf->entities.world, 
-        bsf_item_system, 
+        bsf_consumable_system, 
         EcsOnUpdate,
         bsf_component_transform_t, 
         bsf_component_physics_t, 
-        bsf_component_item_t
+        bsf_component_consumable_t
     ); 
 
     ECS_SYSTEM(
@@ -966,6 +1251,25 @@ GS_API_DECL void bsf_entities_init(struct bsf_t* bsf)
         bsf_component_physics_t,
         bsf_component_transform_t, 
         bsf_component_timer_t 
+    );
+
+    ECS_SYSTEM(
+        bsf->entities.world, 
+        bsf_obstacle_system,
+        EcsOnUpdate,
+        bsf_component_transform_t, 
+        bsf_component_physics_t,
+        bsf_component_obstacle_t
+    );
+
+    ECS_SYSTEM(
+        bsf->entities.world, 
+        bsf_item_chest_system, 
+        EcsOnUpdate, 
+        bsf_component_transform_t,
+        bsf_component_physics_t,
+        bsf_component_item_chest_t,
+		bsf_component_renderable_immediate_t
     );
 }
 
@@ -1064,6 +1368,9 @@ GS_API_DECL ecs_entity_t bsf_explosion_create(struct bsf_t* bsf, ecs_world_t* wo
 
     bsf_camera_shake(bsf, &bsf->scene.camera, 0.3f);
 
+    // Play sound
+    bsf_play_sound(bsf, "audio.explosion", 0.1f);
+
     ecs_set(world, b, bsf_component_timer_t, {.max = 1.f}); 
     ecs_set(world, b, bsf_component_explosion_t, {.owner = owner});
 
@@ -1116,7 +1423,7 @@ GS_API_DECL void bsf_explosion_system(ecs_iter_t* it)
 					{ 
 						bsf_component_health_t* h = ecs_get(bsf->entities.world, mob, bsf_component_health_t);
 						h->hit = true; 
-						h->health -= 0.4f;
+						h->health -= 1.f;
 						h->hit_timer = 0.f;
 						break;
 					} 
@@ -1192,6 +1499,8 @@ GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
     gs_immediate_draw_t* gsi = &bsf->gs.gsi;
     const float t = gs_platform_elapsed_time();
     const float dt = gs_platform_delta_time(); 
+    const gs_platform_input_t* input = &gs_subsystem(platform)->input;
+    const gs_platform_gamepad_t* gp = &input->gamepads[0];
     const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
     bsf_component_renderable_immediate_t* rc = ecs_term(it, bsf_component_renderable_immediate_t, 1);
     bsf_component_transform_t* tc = ecs_term(it, bsf_component_transform_t, 2);
@@ -1271,6 +1580,7 @@ GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
             const float sx = 2000;
             const float sy = 300; 
             const float step = 20.f;
+            /*
             for (float r = -sz; r < sz; r += step)
             {
                 // Draw row
@@ -1286,52 +1596,92 @@ GS_API_DECL void bsf_renderable_immediate_system(ecs_iter_t* it)
                     gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 40));
                 }
             }
-            gsi_box(gsi, 0.f, BSF_ROOM_HEIGHT / 2.f + 0.15f, 0.f, BSF_ROOM_WIDTH, BSF_ROOM_HEIGHT / 2.f, BSF_ROOM_DEPTH, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+            */
+            // gsi_box(gsi, 0.f, BSF_ROOM_HEIGHT / 2.f + 0.15f, 0.f, BSF_ROOM_WIDTH, BSF_ROOM_HEIGHT / 2.f, BSF_ROOM_DEPTH, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+            //
+            /*
+            const float sz = 150;
+            const float sx = 500;
+            const float sy = 100; 
+            */
+            gs_color_t c0 = gs_color(6, 59, 0, 255); 
+            gs_color_t c1 = gs_color(14, 255, 0, 255); 
+            for (float r = -sz; r <= sz; r += step)
+            {
+                const float ct = gs_map_range(-sz, sz, 0.f, 1.f, r);
+                gs_color_t color = gs_color(
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.r / 255.f, (float)c1.r / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.g / 255.f, (float)c1.g / 255.f, ct)), 
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.b / 255.f, (float)c1.b / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.a / 255.f, (float)c1.a / 255.f, ct))
+                );
+
+                gs_vec3 s = gs_v3(-sx, 0.f, r);
+                gsi_rect3Dv(gsi, s, gs_v3(2 * sx, 0.f, r + step), gs_v2s(0.f), gs_v2s(1.f), color, GS_GRAPHICS_PRIMITIVE_TRIANGLES);
+            }
         } break;
 
         case BSF_MOVEMENT_RAIL:
         {
+            // All the ground
             const float sz = 150;
             const float sx = 500;
-            const float sy = 100; 
-            const float step = 10.f;
-            const float zoff = fmod(t * 0.02f, step);
-            for (float r = -sz; r <= step; r += step)
-            {
-                // Draw row
-                gs_vec3 s = gs_v3(-sx, 0.f, r + zoff);
-                gs_vec3 e = gs_v3(sx, 0.f, r + zoff);
-                gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 30));
-
-                for (float c = -sx; c < sx; c += step)
+            const float sy = 100;
+            const float step = 20.f;
+            const float speed_mod = gp->axes[GS_PLATFORM_JOYSTICK_AXIS_RTRIGGER] >= 0.4f || gs_platform_key_down(GS_KEYCODE_LEFT_SHIFT) ? 3.f : 1.f;
+            const float zoff = fmod(t * 0.02f * speed_mod, step);
+            gs_color_t c0 = gs_color(6, 59, 0, 255); 
+            gs_color_t c1 = gs_color(14, 255, 0, 255); 
+            for (float r = -sz * 0.5f; r <= sz; r += step)
+            { 
+                for (float c = -80; c < 80; c += step)
                 {
                     // Draw columns
-                    s = gs_v3(c, 0.f, -sz + zoff);
-                    e = gs_v3(c, 0.f, sz + zoff);
-                    gsi_line3Dv(gsi, s, e, gs_color_alpha(GS_COLOR_GREEN, 30));
+                    gsi_box(gsi, c, 0.f, r + zoff, 0.1f, 0.1f, 0.1f, 255, 255, 255, 255, GS_GRAPHICS_PRIMITIVE_TRIANGLES);
                 }
             }
-            gs_vec3 kb = {25.f, 25.f, 50.f};
-            gsi_box(gsi, 0.f, kb.y / 2.f, 0.f, kb.x + 1.f, kb.y / 2.f, kb.z + 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
 
-            for (float r = -sz; r <= step; r += step)
+            for (float r = -sz; r <= sz; r += step)
             {
-                // Draw row
-                gs_vec3 s = gs_v3(-sx, 0.f, r + zoff);
-                gs_vec3 e = gs_v3(sx, 0.f, r + zoff);
+                const float ct = gs_map_range(-sz, sz, 0.f, 1.f, r);
+                gs_color_t color = gs_color(
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.r / 255.f, (float)c1.r / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.g / 255.f, (float)c1.g / 255.f, ct)), 
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.b / 255.f, (float)c1.b / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.a / 255.f, (float)c1.a / 255.f, ct))
+                );
 
+                gs_vec3 s = gs_v3(-sx, 0.f, r);
+                gsi_rect3Dv(gsi, s, gs_v3(2 * sx, 0.f, r + step), gs_v2s(0.f), gs_v2s(1.f), color, GS_GRAPHICS_PRIMITIVE_TRIANGLES);
+            }
+
+            // Debug bounding area
+            gs_vec3 kb = {BSF_ROOM_BOUND_X, BSF_ROOM_BOUND_Y, BSF_ROOM_BOUND_Z}; 
+            /*
+            gsi_box(gsi, 0.f, kb.y / 2.f, 0.f, kb.x + 1.f, kb.y / 2.f, kb.z + 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+            */
+
+            // Drawing the tiny, moving guide boxes
+            for (float r = -sz; r <= step; r += step)
+            { 
                 for (float c = -sx; c < sx; c += step)
                 {
                     // Draw columns
-                    s = gs_v3(c, 0.f, -sz + zoff);
-                    e = gs_v3(c, 0.f, sz + zoff);
                     float y = gs_perlin2(sx, sz);
-                    gsi_box(gsi, c, y * 0.5f, sz + zoff, 1.f, y * 0.5f, 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+                    gsi_box(gsi, c, y * 0.5f, sz + zoff, 1.f, y * 0.5f, 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_TRIANGLES);
                 }
             }
 
             // Do random boxes based on seed value (for obstacles) 
-            gsi_box(gsi, kb.x, kb.y / 2.f, -sz + kb.z, 1.f, kb.y / 2.f, 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
+            gs_mt_rand_t rand = gs_rand_seed(gs_hash_str64("mountains"));
+            for (uint32_t i = 0; i < 100; ++i) 
+            {
+                float rx = gs_rand_gen_range(&rand, -500, 500.f); 
+                float rsx = gs_rand_gen_range(&rand, 1.f, 50.f); 
+                float ry = gs_rand_gen_range(&rand, 1.f, kb.y); 
+                float rz = 1.f; 
+                gsi_box(gsi, rx, ry * 0.5f, -kb.z, rsx, ry * 0.5f, rz, 20, 100, 255, 255, GS_GRAPHICS_PRIMITIVE_TRIANGLES);
+            }
 
         } break;
     }
@@ -1447,16 +1797,269 @@ GS_API_DECL void bsf_camera_shake(struct bsf_t* bsf, bsf_camera_t* camera, float
     camera->shake_time = gs_clamp(camera->shake_time + amt, 0.f, 1.f);
 }
 
+//=== BSF Obstacle ===//
+
+GS_API_DECL ecs_entity_t bsf_obstacle_create(struct bsf_t* bsf, gs_vqs* xform, bsf_obstacle_type type)
+{
+    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
+    ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
+
+    ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
+	ecs_set(bsf->entities.world, e, bsf_component_obstacle_t, {.type = type});
+
+    switch (type)
+    {
+        case BSF_OBSTACLE_BUILDING:
+        { 
+            ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
+                .shape = BSF_SHAPE_BOX,
+                .model = gs_vqs_to_mat4(xform),
+				.material = mat,
+                .color = GS_COLOR_WHITE
+            });
+
+	        ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
+				.collider = {
+					.type = BSF_COLLIDER_AABB,
+					.xform = gs_vqs_default(),
+					.shape.aabb = (gs_aabb_t) {
+						.min = gs_v3s(-0.5f),
+						.max = gs_v3s(0.5f)
+					}
+				}
+            });
+        } break;
+    }
+} 
+
+GS_API_DECL void bsf_obstacle_system(ecs_iter_t* it)
+{
+	bsf_t* bsf = gs_user_data(bsf_t); 
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+    const gs_platform_input_t* input = gs_platform_input();
+    const gs_platform_gamepad_t* gp = &input->gamepads[0];
+    const float t = gs_platform_elapsed_time();
+    const float dt = gs_platform_delta_time() * bsf->run.time_scale; 
+    bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 1);
+    bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 2); 
+    bsf_component_obstacle_t* oca = ecs_term(it, bsf_component_obstacle_t, 3); 
+
+    bsf_component_transform_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_transform_t);
+    bsf_component_physics_t* ppc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_physics_t); 
+
+    float speed_mod = gp->axes[GS_PLATFORM_JOYSTICK_AXIS_RTRIGGER] >= 0.4f || gs_platform_key_down(GS_KEYCODE_LEFT_SHIFT) ? 35.f : 20.f;
+    if (room->cleared) speed_mod = 50.f;
+
+    if (bsf->dbg) return; 
+
+    for (uint32_t i = 0; i < it->count; ++i)
+    {
+        ecs_entity_t ent = it->entities[i];
+        bsf_component_transform_t* tc = &tca[i];
+        bsf_component_physics_t* pc = &pca[i]; 
+        bsf_component_obstacle_t* oc = &oca[i]; 
+
+        // Move obstacle forward over time towards player over time, snap back to start
+        gs_vec3* pos = &tc->xform.translation; 
+
+        switch (room->movement_type)
+        {
+            case BSF_MOVEMENT_RAIL:
+            { 
+                pos->z += dt * speed_mod;
+
+                if (room->cleared && pos->z > BSF_ROOM_BOUND_Z) { 
+                    bsf_obstacle_destroy(it->world, ent);
+                } 
+                else if (pos->z > BSF_ROOM_BOUND_Z) {
+                    pos->z = -BSF_ROOM_BOUND_Z;
+                }
+            } break;
+
+            case BSF_MOVEMENT_FREE_RANGE:
+            {
+                if (room->cleared) { 
+                    bsf_obstacle_destroy(it->world, ent);
+                } 
+            } break;
+        }
+        
+    }
+} 
+
 //=== BSF Item ===//
 
-GS_API_DECL ecs_entity_t bsf_item_create(struct bsf_t* bsf, gs_vqs* xform, bsf_item_type type)
+GS_API_DECL void bsf_item_remove_from_pool(struct bsf_t* bsf, bsf_item_type type)
+{
+    for (uint32_t i = 0; i < gs_dyn_array_size(bsf->run.item_pool); ++i)
+    {
+        if (bsf->run.item_pool[i] == type) return;
+    }
+    gs_dyn_array_push(bsf->run.item_pool, type);
+} 
+
+//=== BSF Item Chest ===//
+
+GS_API_DECL ecs_entity_t bsf_item_chest_create(struct bsf_t* bsf, gs_vqs* xform, bsf_item_type type)
+{
+    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
+    ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
+
+    ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
+        .shape = BSF_SHAPE_BOX,
+        .model = gs_vqs_to_mat4(xform),
+        .material = mat,
+        .color = GS_COLOR_ORANGE
+    });
+
+    ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
+        .collider = {
+            .type = BSF_COLLIDER_AABB,
+            .xform = gs_vqs_default(),
+            .shape.aabb = (gs_aabb_t) {
+                .min = gs_v3s(-0.5f),
+                .max = gs_v3s(0.5f)
+            }
+        }
+    }); 
+
+    ecs_set(bsf->entities.world, e, bsf_component_item_chest_t, {
+        .type = type, 
+        .origin = (gs_vqs) {
+            .translation = xform->translation,
+            .rotation = xform->rotation, 
+            .scale = gs_v3s(0.2f)
+        },
+        .time_scale = {
+            gs_rand_gen_range(&bsf->run.rand, 0.001f, 0.005f),
+            gs_rand_gen_range(&bsf->run.rand, 0.001f, 0.005f),
+            gs_rand_gen_range(&bsf->run.rand, 0.001f, 0.005f)
+        }
+    });
+
+    ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
+
+    return e;
+}
+
+GS_API_DECL void bsf_item_chest_system(ecs_iter_t* it)
+{
+	bsf_t* bsf = gs_user_data(bsf_t); 
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+    const float t = gs_platform_elapsed_time();
+    const float dt = gs_platform_delta_time() * bsf->run.time_scale; 
+    const gs_platform_input_t* input = gs_platform_input();
+    const gs_platform_gamepad_t* gp = &input->gamepads[0];
+    bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 1);
+    bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 2); 
+    bsf_component_item_chest_t* ica = ecs_term(it, bsf_component_item_chest_t, 3); 
+	bsf_component_renderable_immediate_t* rca = ecs_term(it, bsf_component_renderable_immediate_t, 4);
+    bsf_component_transform_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_transform_t);
+    bsf_component_physics_t* ppc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_physics_t); 
+
+    if (bsf->dbg) return; 
+
+    for (uint32_t i = 0; i < it->count; ++i)
+    {
+        ecs_entity_t ent = it->entities[i];
+        bsf_component_transform_t* tc = &tca[i];
+        bsf_component_physics_t* pc = &pca[i]; 
+        bsf_component_item_chest_t* ic = &ica[i];
+		bsf_component_renderable_immediate_t* rc = &rca[i];
+
+        gs_vqs offset = (gs_vqs){
+            .translation = gs_v3(0.f, sin(t * ic->time_scale[0]) * 0.1f, 0.f),
+            .rotation = gs_quat_angle_axis(t * ic->time_scale[1], GS_YAXIS),
+            .scale = gs_v3s(gs_map_range(0.f, 1.f, 4.f, 6.f, (sin(dt * ic->time_scale[2]) * 0.5f + 0.5f)))
+        }; 
+
+        // Move original translation up over time towards player
+        gs_vec3* pos = &ic->origin.translation; 
+
+        // Spin and hover over time 
+        tc->xform = (gs_vqs) {
+            .translation = gs_vec3_add(ic->origin.translation, offset.translation),
+            .rotation = gs_quat_mul(ic->origin.rotation, offset.rotation),
+            .scale = gs_vec3_add(ic->origin.scale, offset.scale)
+        }; 
+
+		if (ic->hit)
+		{
+			ic->hit = false; 
+			ic->hit_count++;
+			if (ic->hit_count > 10) {
+				bsf_item_chest_destroy(it->world, ent);
+				bsf_explosion_create(bsf, it->world, &tc->xform, BSF_OWNER_PLAYER); 
+                bsf_player_item_pickup(bsf, it->world, ic->type);
+
+			}
+		} 
+
+		// Grab the renderable immediate component, then set the color based on it being hit
+		gs_color_t c0 = GS_COLOR_ORANGE; 
+		gs_color_t c1 = GS_COLOR_RED; 
+		const float ct = gs_map_range(0, 10, 0.f, 1.f, (float)ic->hit_count);
+		gs_color_t color = gs_color(
+			(uint8_t)(255.f * gs_interp_smoothstep((float)c0.r / 255.f, (float)c1.r / 255.f, ct)),
+			(uint8_t)(255.f * gs_interp_smoothstep((float)c0.g / 255.f, (float)c1.g / 255.f, ct)), 
+			(uint8_t)(255.f * gs_interp_smoothstep((float)c0.b / 255.f, (float)c1.b / 255.f, ct)),
+			(uint8_t)(255.f * gs_interp_smoothstep((float)c0.a / 255.f, (float)c1.a / 255.f, ct))
+		); 
+
+		rc->color = color; 
+    } 
+}
+
+GS_API_DECL void bsf_item_chest_destroy(ecs_world_t* world, ecs_entity_t ent)
+{
+    bsf_t* bsf = gs_user_data(bsf_t);
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Have to iterate over the dynamic array of mobs and remove... 
+    for (uint32_t i = 0; i < gs_dyn_array_size(room->items); ++i)
+    {
+        if (ent == room->items[i])
+        { 
+            room->items[i] = gs_dyn_array_back(room->items);
+            gs_dyn_array_pop(room->items);
+            break;
+        }
+    }
+
+    ecs_delete(world, ent);
+}
+
+//=== BSF Consumable ===//
+
+GS_API_DECL void bsf_consumable_destroy(ecs_world_t* world, ecs_entity_t ent)
+{
+    bsf_t* bsf = gs_user_data(bsf_t);
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Have to iterate over the dynamic array of mobs and remove... 
+    for (uint32_t i = 0; i < gs_dyn_array_size(room->consumables); ++i)
+    {
+        if (ent == room->consumables[i])
+        { 
+            room->consumables[i] = gs_dyn_array_back(room->consumables);
+            gs_dyn_array_pop(room->consumables);
+            break;
+        }
+    }
+
+    ecs_delete(world, ent);
+}
+
+GS_API_DECL ecs_entity_t bsf_consumable_create(struct bsf_t* bsf, gs_vqs* xform, bsf_consumable_type type)
 {
     gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
     ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
 
     switch (type)
     {
-        case BSF_ITEM_HEALTH:
+        case BSF_CONSUMABLE_HEALTH:
         {
             ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
                 .shape = BSF_SHAPE_CROSS,
@@ -1478,7 +2081,7 @@ GS_API_DECL ecs_entity_t bsf_item_create(struct bsf_t* bsf, gs_vqs* xform, bsf_i
 
         } break;
 
-        case BSF_ITEM_BOMB:
+        case BSF_CONSUMABLE_BOMB:
         {
             ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
                 .shape = BSF_SHAPE_SPHERE,
@@ -1500,7 +2103,7 @@ GS_API_DECL ecs_entity_t bsf_item_create(struct bsf_t* bsf, gs_vqs* xform, bsf_i
         } break;
     } 
 
-    ecs_set(bsf->entities.world, e, bsf_component_item_t, {
+    ecs_set(bsf->entities.world, e, bsf_component_consumable_t, {
         .type = type, 
         .origin = (gs_vqs) {
             .translation = xform->translation,
@@ -1518,18 +2121,23 @@ GS_API_DECL ecs_entity_t bsf_item_create(struct bsf_t* bsf, gs_vqs* xform, bsf_i
     return e;
 }
 
-GS_API_DECL void bsf_item_system(ecs_iter_t* it)
+GS_API_DECL void bsf_consumable_system(ecs_iter_t* it)
 {
 	bsf_t* bsf = gs_user_data(bsf_t); 
 	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
     const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
     const float t = gs_platform_elapsed_time();
     const float dt = gs_platform_delta_time() * bsf->run.time_scale; 
+    const gs_platform_input_t* input = gs_platform_input();
+    const gs_platform_gamepad_t* gp = &input->gamepads[0];
     bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 1);
     bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 2); 
-    bsf_component_item_t* ica = ecs_term(it, bsf_component_item_t, 3);
+    bsf_component_consumable_t* ica = ecs_term(it, bsf_component_consumable_t, 3);
     bsf_component_transform_t* ptc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_transform_t);
     bsf_component_physics_t* ppc = ecs_get(bsf->entities.world, bsf->entities.player, bsf_component_physics_t);
+
+    float speed_mod = gp->axes[GS_PLATFORM_JOYSTICK_AXIS_RTRIGGER] >= 0.4f || gs_platform_key_down(GS_KEYCODE_LEFT_SHIFT) ? 35.f : 20.f;
+    if (room->cleared) speed_mod = 35.f;
 
     if (bsf->dbg) return; 
 
@@ -1538,20 +2146,32 @@ GS_API_DECL void bsf_item_system(ecs_iter_t* it)
         ecs_entity_t ent = it->entities[i];
         bsf_component_transform_t* tc = &tca[i];
         bsf_component_physics_t* pc = &pca[i]; 
-        bsf_component_item_t* ic = &ica[i]; 
+        bsf_component_consumable_t* ic = &ica[i]; 
 
         gs_vqs offset = (gs_vqs){
-            .translation = gs_v3(0.f, sin(dt * t * ic->time_scale[0]) * 0.1f, 0.f),
-            .rotation = gs_quat_angle_axis(dt * t * ic->time_scale[1], GS_YAXIS),
-            .scale = gs_v3s(gs_map_range(0.f, 1.f, 0.7f, 1.f, (sin(dt * t * ic->time_scale[2]) * 0.5f + 0.5f)))
-        };
+            .translation = gs_v3(0.f, sin(t * ic->time_scale[0]) * 0.1f, 0.f),
+            .rotation = gs_quat_angle_axis(t * ic->time_scale[1], GS_YAXIS),
+            .scale = gs_v3s(gs_map_range(0.f, 1.f, 0.7f, 1.f, (sin(dt * ic->time_scale[2]) * 0.5f + 0.5f)))
+        }; 
+
+        // Move original translation up over time towards player
+        gs_vec3* pos = &ic->origin.translation; 
+        
+        pos->z += dt * speed_mod;
+
+        if (room->cleared && pos->z > BSF_ROOM_BOUND_Z) { 
+            bsf_consumable_destroy(it->world, ent);
+        } 
+        else if (pos->z > BSF_ROOM_BOUND_Z) {
+            pos->z = -BSF_ROOM_BOUND_Z;
+        }
 
         // Spin and hover over time 
         tc->xform = (gs_vqs) {
             .translation = gs_vec3_add(ic->origin.translation, offset.translation),
             .rotation = gs_quat_mul(ic->origin.rotation, offset.rotation),
             .scale = gs_vec3_add(ic->origin.scale, offset.scale)
-        };
+        }; 
 
         // Check for collision against player
         gs_contact_info_t res = bsf_component_physics_collide(pc, &tc->xform, ppc, &ptc->xform); 
@@ -1559,33 +2179,34 @@ GS_API_DECL void bsf_item_system(ecs_iter_t* it)
         if (res.hit)
         {
             // Player pickup
-            bsf_player_item_pickup(bsf, it->world, ic->type);
+            bsf_player_consumable_pickup(bsf, it->world, ic->type);
 
-            // Delete entity
-            ecs_delete(it->world, ent);
+            // Destroy consumable
+            bsf_consumable_destroy(it->world, ent); 
         } 
     }
 }
 
 //=== BSF Mob ===//
 
-GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mob_type type)
+GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, ecs_world_t* world, gs_vqs* xform, bsf_mob_type type)
 {
-    // gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi")); 
-    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
-    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.bandit"));
-    
-
-    ecs_entity_t e = ecs_new(bsf->entities.world, 0); 
+    ecs_entity_t e = ecs_new(world, 0); 
 
     switch (type)
     {
-        case BSF_MOB_BANDIT: 
-        { 
-            xform->scale = gs_v3s(0.3f);
-            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
+        case BSF_MOB_BOSS:
+        {
+            gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.brain"));
+            gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.brain")); 
+            gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.default"));
+            gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 1.f, 1.f}); 
+            gs_gfxt_material_set_uniform(mat, "u_tex", tex); 
 
-            ecs_set(bsf->entities.world, e, bsf_component_renderable_t, { 
+            xform->scale = gs_v3s(1.f); 
+            ecs_set(world, e, bsf_component_transform_t, {.xform = *xform});
+
+            ecs_set(world, e, bsf_component_renderable_t, { 
                 .hndl = bsf_graphics_scene_renderable_create(&bsf->scene, &(bsf_renderable_desc_t){
                     .material = mat,
                     .mesh = mesh,
@@ -1593,7 +2214,92 @@ GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mo
                 })
             }); 
 
-	        ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
+	        ecs_set(world, e, bsf_component_physics_t, {
+				.collider = {
+					.type = BSF_COLLIDER_AABB,
+					.xform = (gs_vqs){
+                        .translation = gs_v3(0.f, 3.f, -2.5f),
+                        .rotation = gs_quat_default(),
+                        .scale = gs_v3(10.f, 10.f, 10.f)
+                    },
+					.shape.aabb = (gs_aabb_t) {
+						.min = gs_v3s(-0.5f),
+						.max = gs_v3s(0.5f)
+					}
+				}
+            });
+
+            ecs_set(world, e, bsf_component_ai_t, {
+                .target = xform->translation
+            }); 
+
+            ecs_set(world, e, bsf_component_health_t, {.health = 100.f});
+
+        } break;
+
+        case BSF_MOB_TURRET:
+        {
+            gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.turret"));
+            gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.turret")); 
+            gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.arwing"));
+            gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){0.5f, 0.8f, 0.2f}); 
+            gs_gfxt_material_set_uniform(mat, "u_tex", tex); 
+
+            xform->scale = gs_v3s(0.1f);
+            ecs_set(world, e, bsf_component_transform_t, {.xform = *xform});
+
+            ecs_set(world, e, bsf_component_renderable_t, { 
+                .hndl = bsf_graphics_scene_renderable_create(&bsf->scene, &(bsf_renderable_desc_t){
+                    .material = mat,
+                    .mesh = mesh,
+                    .model = gs_vqs_to_mat4(xform)
+                })
+            }); 
+
+	        ecs_set(world, e, bsf_component_physics_t, {
+				.collider = {
+					.type = BSF_COLLIDER_AABB,
+					.xform = (gs_vqs){
+                        .translation = gs_v3(0.f, 3.f, -2.5f),
+                        .rotation = gs_quat_default(),
+                        .scale = gs_v3(10.f, 10.f, 10.f)
+                    },
+					.shape.aabb = (gs_aabb_t) {
+						.min = gs_v3s(-0.5f),
+						.max = gs_v3s(0.5f)
+					}
+				}
+            });
+
+            ecs_set(world, e, bsf_component_ai_t, {
+                .target = xform->translation
+            }); 
+
+            ecs_set(world, e, bsf_component_health_t, {.health = 1.f});
+
+        } break;
+
+        case BSF_MOB_BANDIT: 
+        { 
+            gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.bandit"));
+            gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.bandit")); 
+            gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.arwing"));
+            gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 0.4f, 0.1f}); 
+            gs_gfxt_material_set_uniform(mat, "u_tex", tex); 
+
+            xform->scale = gs_v3s(0.3f);
+            xform->rotation = gs_quat_angle_axis(gs_deg2rad(180.f), GS_YAXIS);
+            ecs_set(world, e, bsf_component_transform_t, {.xform = *xform});
+
+            ecs_set(world, e, bsf_component_renderable_t, { 
+                .hndl = bsf_graphics_scene_renderable_create(&bsf->scene, &(bsf_renderable_desc_t){
+                    .material = mat,
+                    .mesh = mesh,
+                    .model = gs_vqs_to_mat4(xform)
+                })
+            }); 
+
+	        ecs_set(world, e, bsf_component_physics_t, {
 				.collider = {
 					.type = BSF_COLLIDER_AABB,
 					.xform = (gs_vqs){
@@ -1608,74 +2314,39 @@ GS_API_DECL ecs_entity_t bsf_mob_create(struct bsf_t* bsf, gs_vqs* xform, bsf_mo
 				}
             });
 
-            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
+            ecs_set(world, e, bsf_component_ai_t, {
                 .target = xform->translation
             }); 
 
-        } break;
+            ecs_set(world, e, bsf_component_health_t, {.health = 1.f});
 
-        case BSF_MOB_SPHERE: 
-        {
-            ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
-                .shape = BSF_SHAPE_SPHERE,
-                .model = gs_vqs_to_mat4(xform),
-				.material = mat,
-                .color = GS_COLOR_WHITE
-            });
-
-	        ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
-				.collider = {
-					.xform = gs_vqs_default(),
-					.type = BSF_COLLIDER_SPHERE,
-					.shape.sphere = (gs_sphere_t) {
-						.c = gs_v3s(0.f),
-						.r = 0.5f
-					}
-				}
-            });
-
-            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
-                .target = xform->translation
-            }); 
-
-            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
-        } break;
-
-        case BSF_MOB_CONE:
-        {
-            ecs_set(bsf->entities.world, e, bsf_component_renderable_immediate_t, {
-                .shape = BSF_SHAPE_CONE,
-                .model = gs_vqs_to_mat4(xform),
-				.material = mat,
-                .color = GS_COLOR_WHITE
-            });
-
-	        ecs_set(bsf->entities.world, e, bsf_component_physics_t, {
-				.collider = {
-					.xform = gs_vqs_default(),
-					.type = BSF_COLLIDER_CONE,
-					.shape.cone = (gs_cone_t) {
-						.base = gs_v3s( 0.f ),
-						.r = 0.5f,
-						.height = 1.f
-					}
-				}
-            });
-
-            ecs_set(bsf->entities.world, e, bsf_component_ai_t, {
-                .target = xform->translation
-            }); 
-
-            ecs_set(bsf->entities.world, e, bsf_component_transform_t, {.xform = *xform});
-        } break;
+        } break; 
     }
  
-    ecs_set(bsf->entities.world, e, bsf_component_health_t, {.health = 1.f});
-    ecs_set(bsf->entities.world, e, bsf_component_mob_t, {.type = type});
-    ecs_set(bsf->entities.world, e, bsf_component_gun_t, {0}); 
+    ecs_set(world, e, bsf_component_mob_t, {.type = type});
+    ecs_set(world, e, bsf_component_gun_t, {0}); 
 
     return e;
 } 
+
+void bsf_obstacle_destroy(ecs_world_t* world, ecs_entity_t obstacle) 
+{
+    bsf_t* bsf = gs_user_data(bsf_t);
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Have to iterate over the dynamic array of mobs and remove... 
+    for (uint32_t i = 0; i < gs_dyn_array_size(room->obstacles); ++i)
+    {
+        if (obstacle == room->obstacles[i])
+        { 
+            room->obstacles[i] = gs_dyn_array_back(room->obstacles);
+            gs_dyn_array_pop(room->obstacles);
+            break;
+        }
+    }
+
+    ecs_delete(world, obstacle);
+}
 
 void bsf_mob_destroy(ecs_world_t* world, ecs_entity_t mob)
 {
@@ -1693,6 +2364,11 @@ void bsf_mob_destroy(ecs_world_t* world, ecs_entity_t mob)
         }
     }
 
+    // Chance to slow down time scale
+    if (gs_rand_gen_long(&bsf->run.rand) % 3) bsf->run.time_scale = 0.5f;
+
+    if (bsf->entities.boss == mob) bsf->entities.boss = UINT_MAX;
+
     ecs_delete(world, mob);
 }
 
@@ -1702,13 +2378,46 @@ void bsf_ai_task_find_rand_target_location(struct gs_ai_bt_t* bt, struct gs_ai_b
     const float dt = gs_platform_time()->delta; 
     bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
     float dist = gs_vec3_dist(data->tc->xform.translation, data->ac->target);
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    gs_vec3 target = data->ac->target;
+    const bsf_component_mob_t* mc = data->mc;
     if (dist < 1.f)
     {
-		gs_vec3 target = gs_v3(
-            gs_rand_gen_range(&bsf->run.rand, -10.f, 10.f),
-            gs_rand_gen_range(&bsf->run.rand, 1.f, 10.f),
-            gs_rand_gen_range(&bsf->run.rand, -4.f, 10.f)
-        );
+        switch (room->movement_type)
+        {
+            case BSF_MOVEMENT_RAIL:
+            {
+                switch (mc->type)
+                {
+                    default:
+                    {
+                        target = gs_v3(
+                            gs_rand_gen_range(&bsf->run.rand, -10.f, 10.f),
+                            gs_rand_gen_range(&bsf->run.rand, 1.f, 10.f),
+                            gs_rand_gen_range(&bsf->run.rand, -4.f, 10.f)
+                        );
+                    } break;
+
+                    case BSF_MOB_BOSS:
+                    {
+                        target = gs_v3(
+                            gs_rand_gen_range(&bsf->run.rand, -10.f, 10.f),
+                            gs_rand_gen_range(&bsf->run.rand, 1.f, 10.f),
+                            gs_rand_gen_range(&bsf->run.rand, -10.f, 4.f)
+                        );
+                    } break;
+                }
+            } break;
+
+            case BSF_MOVEMENT_FREE_RANGE: 
+            {
+                target = gs_v3(
+                    gs_rand_gen_range(&bsf->run.rand, -BSF_ROOM_BOUND_X, BSF_ROOM_BOUND_X),
+                    gs_rand_gen_range(&bsf->run.rand, 1.f, BSF_ROOM_BOUND_Y),
+                    gs_rand_gen_range(&bsf->run.rand, -BSF_ROOM_BOUND_Z, BSF_ROOM_BOUND_Z)
+                );
+            } break;
+        }
         data->ac->target = target;
 		data->ac->wait = 0.f;
     }
@@ -1717,22 +2426,23 @@ void bsf_ai_task_find_rand_target_location(struct gs_ai_bt_t* bt, struct gs_ai_b
 
 void bsf_ai_task_move_to_target_location(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
 {
-    const float dt = gs_platform_time()->delta; 
+	bsf_t* bsf = gs_user_data(bsf_t);
+    const float dt = gs_platform_time()->delta * bsf->run.time_scale; 
     bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
     float dist = gs_vec3_dist(data->tc->xform.translation, data->ac->target);
     float speed = dist * dt * 50.f;
-	bsf_t* bsf = gs_user_data(bsf_t);
     const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
 
     // Face player while moving 
     gs_vec3 diff = gs_vec3_sub(data->ptc->xform.translation, data->tc->xform.translation);
     diff.y = 0.f;
     gs_vec3 dir = gs_vec3_norm(diff);
-    gs_vec3 forward = gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f)); 
+    gs_vec3 forward = gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, 1.f)); 
     forward.y = 0.f;
     forward = gs_vec3_norm(forward);
     gs_quat rot = gs_quat_from_to_rotation(forward, dir);
-    data->tc->xform.rotation = rot; //gs_quat_slerp(data->tc->xform.rotation, rot, 0.8f);
+    // data->tc->xform.rotation = rot; //gs_quat_slerp(data->tc->xform.rotation, rot, 0.8f);
+    data->tc->xform.rotation = gs_quat_slerp(data->tc->xform.rotation, rot, 0.8f);
 
     // Debug draw line
     gsi_defaults(&bsf->gs.gsi);
@@ -1741,19 +2451,47 @@ void bsf_ai_task_move_to_target_location(struct gs_ai_bt_t* bt, struct gs_ai_bt_
     gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(dir, 10.f)), GS_COLOR_RED); 
     gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(forward, 5.f)), GS_COLOR_BLUE);
 
+    float scl = data->mc->type == BSF_MOB_BOSS ? 0.075f : 0.1f;
+
     if (dist > 1.f) {
         gs_vec3 vel = gs_vec3_scale(gs_vec3_norm(gs_vec3_sub(data->ac->target, data->tc->xform.translation)), speed);
         gs_vec3 np = gs_vec3_add(data->tc->xform.translation, vel);
         data->tc->xform.translation = gs_v3(
-            gs_interp_smoothstep(data->tc->xform.translation.x, np.x, 0.1f),
-            gs_interp_smoothstep(data->tc->xform.translation.y, np.y, 0.1f),
-            gs_interp_smoothstep(data->tc->xform.translation.z, np.z, 0.1f)
+            gs_interp_smoothstep(data->tc->xform.translation.x, np.x, scl),
+            gs_interp_smoothstep(data->tc->xform.translation.y, np.y, scl),
+            gs_interp_smoothstep(data->tc->xform.translation.z, np.z, scl)
         );
 		node->state = GS_AI_BT_STATE_RUNNING;
     }
     else {
         node->state = GS_AI_BT_STATE_SUCCESS;
     }
+} 
+
+void bsf_ai_task_spawn_bandit(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
+{
+	bsf_t* bsf = gs_user_data(bsf_t);
+    const float dt = gs_platform_time()->delta; 
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+
+    // Get random direction vector
+    gs_vec3 dir = gs_vec3_norm(gs_v3(
+        gs_rand_gen(&bsf->run.rand),
+        gs_rand_gen(&bsf->run.rand),
+        gs_rand_gen(&bsf->run.rand)
+    )); 
+
+    float rad = gs_rand_gen_range(&bsf->run.rand, 5.f, 50.f); 
+
+    bsf_mob_type type = BSF_MOB_BANDIT;
+    gs_vqs xform = gs_vqs_default();
+    xform.translation = gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(dir, rad));
+    ecs_entity_t e = bsf_mob_create(bsf, data->world, &xform, type);
+    gs_dyn_array_push(room->mobs, e); 
+
+    node->state = GS_AI_BT_STATE_SUCCESS;
 }
 
 void bsf_ai_task_shoot_at_player(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
@@ -1772,7 +2510,7 @@ void bsf_ai_task_shoot_at_player(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* 
         gs_rand_gen(&bsf->run.rand)
     ));
     const gs_vec3 dir = gs_vec3_norm(gs_vec3_add(diff, gs_vec3_scale(spread, dist2 * 0.00005f)));
-    const gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f))); 
+    const gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(data->tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, 1.f))); 
     const gs_vec3 up = gs_vec3_norm(gs_quat_rotate(data->tc->xform.rotation, GS_YAXIS)); 
     gs_quat rotation = gs_quat_from_to_rotation(forward, dir); 
 
@@ -1784,28 +2522,79 @@ void bsf_ai_task_shoot_at_player(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* 
     gsi_line3Dv(&bsf->gs.gsi, data->tc->xform.translation, gs_vec3_add(data->tc->xform.translation, gs_vec3_scale(forward, 5.f)), GS_COLOR_BLUE);
 
     // Fire
-    if (data->gc->time >= 10.f && gs_rand_gen_long(&bsf->run.rand) % 3)
+    bool chance = data->mc->type == BSF_MOB_BOSS ? 1 : gs_rand_gen_long(&bsf->run.rand) % 3 == 0;
+    bool fire_rate = data->mc->type == BSF_MOB_BOSS ? 5.f : 10.f;
+    if (data->gc->time >= fire_rate && chance)
     { 
         data->gc->time = 0.f;
 
         // Fire projectile using forward of player transform
         gs_vec3 forward = dir; 
-        gs_vqs xform = (gs_vqs){
-            .translation = data->tc->xform.translation, 
-            .rotation = rotation,// rotation,   // Need rotation from forward to player
-            .scale = gs_v3s(0.2f)
-        };
 
-        bsf_projectile_create(bsf, data->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, 4.5f));
+        switch (data->mc->type)
+        {
+            case BSF_MOB_TURRET:
+            {
+                gs_vqs xform = (gs_vqs){
+                    .translation = data->tc->xform.translation, 
+                    .rotation = rotation,// rotation,   // Need rotation from forward to player
+                    .scale = gs_v3s(0.5f)
+                };
 
-        if (gs_rand_gen_long(&bsf->run.rand) % 2) node->state = GS_AI_BT_STATE_SUCCESS;
+                // Play sound 
+                bsf_play_sound(bsf, "audio.laser2", 0.1f);
+
+                float speed = 5.f; 
+                bsf_projectile_create(bsf, data->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, speed));
+                node->state = GS_AI_BT_STATE_SUCCESS;
+            } break;
+
+            case BSF_MOB_BANDIT:
+            {
+                gs_vqs xform = (gs_vqs){
+                    .translation = data->tc->xform.translation, 
+                    .rotation = rotation,// rotation,   // Need rotation from forward to player
+                    .scale = gs_v3s(0.5f)
+                };
+
+                float speed = 5.f; 
+                bsf_projectile_create(bsf, data->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, speed));
+
+                // Play sound 
+                bsf_play_sound(bsf, "audio.laser2", 0.1f);
+
+                if (gs_rand_gen_long(&bsf->run.rand) % 2) node->state = GS_AI_BT_STATE_SUCCESS;
+            } break;
+
+            case BSF_MOB_BOSS:
+            { 
+                gs_vqs xform = (gs_vqs){
+                    .translation = data->tc->xform.translation, 
+                    .rotation = rotation,// rotation,   // Need rotation from forward to player
+                    .scale = gs_v3s(1.f)
+                };
+
+                float speed = 9.f; 
+                bsf_projectile_create(bsf, data->world, BSF_PROJECTILE_BULLET, BSF_OWNER_ENEMY, &xform, gs_vec3_scale(forward, speed));
+
+                // Play sound 
+                bsf_play_sound(bsf, "audio.laser2", 0.1f);
+
+                if (gs_rand_gen_long(&bsf->run.rand) % 13 == 0) node->state = GS_AI_BT_STATE_SUCCESS;
+            } break;
+        }
     }
     else
     {
-        node->state = GS_AI_BT_STATE_RUNNING;
-    }
+        node->state = GS_AI_BT_STATE_RUNNING; 
 
-    data->gc->time += 1.f * gs_rand_gen_range(&bsf->run.rand, 0.1f, 2.f); 
+        switch (data->mc->type)
+        {
+            case BSF_MOB_TURRET: data->gc->time += dt * gs_rand_gen_range(&bsf->run.rand, 0.1f, 1.f); break;
+            case BSF_MOB_BANDIT: data->gc->time += dt * gs_rand_gen_range(&bsf->run.rand, 0.1f, 10.f); break;
+            case BSF_MOB_BOSS: data->gc->time += dt * gs_rand_gen_range(&bsf->run.rand, 0.8f, 10.f); break;
+        }
+    }
 }
 
 void bsf_ai_task_random_impulse(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
@@ -1830,10 +2619,10 @@ void bsf_ai_task_random_impulse(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* n
 
 void bsf_ai_task_fall_to_death(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* node)
 { 
-    const float t = gs_platform_time()->elapsed;
-    const float dt = gs_platform_time()->delta; 
-    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
     bsf_t* bsf = gs_user_data(bsf_t);
+    const float t = gs_platform_time()->elapsed;
+    const float dt = gs_platform_time()->delta * bsf->run.time_scale; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
 
     // Continue to fall until y = 0.f, then diE!
     gs_quat* rot = &data->tc->xform.rotation;
@@ -1850,9 +2639,9 @@ void bsf_ai_task_fall_to_death(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* no
 
         // Add angular velocity to rotation
         gs_quat angular = gs_quat_mul_list(3, 
-            gs_quat_angle_axis(av->x + t * 0.002f, GS_XAXIS), 
-            gs_quat_angle_axis(av->y + t * 0.008f, GS_YAXIS), 
-            gs_quat_angle_axis(av->z + t * 0.005f, GS_ZAXIS)
+            gs_quat_angle_axis(av->x + t * 0.002f * bsf->run.time_scale, GS_XAXIS), 
+            gs_quat_angle_axis(av->y + t * 0.008f * bsf->run.time_scale, GS_YAXIS), 
+            gs_quat_angle_axis(av->z + t * 0.005f * bsf->run.time_scale, GS_ZAXIS)
         );
 
         gs_vec3 fwd = gs_vec3_norm(gs_quat_rotate(*rot, GS_ZAXIS));
@@ -1864,7 +2653,17 @@ void bsf_ai_task_fall_to_death(struct gs_ai_bt_t* bt, struct gs_ai_bt_node_t* no
     else
     { 
         node->state = GS_AI_BT_STATE_SUCCESS;
-        bsf_explosion_create(bsf, data->world, &data->tc->xform, BSF_OWNER_PLAYER);
+        switch (data->mc->type)
+        {
+            default: bsf_explosion_create(bsf, data->world, &data->tc->xform, BSF_OWNER_PLAYER); break;
+            case BSF_MOB_BOSS: 
+            {
+                gs_vqs xform = data->tc->xform;
+                xform.scale = gs_v3s(50.f);
+                bsf_explosion_create(bsf, data->world, &xform, BSF_OWNER_PLAYER);
+                bsf_play_sound(bsf, "audio.explosion_boss", 0.5f);
+            } break; 
+        }
         bsf_mob_destroy(data->world, data->mob); 
     } 
 }
@@ -1909,6 +2708,97 @@ static void bsf_bandit_bt(struct gs_ai_bt_t* bt)
     });
 }
 
+static void bsf_turret_bt(struct gs_ai_bt_t* bt)
+{ 
+    /* 
+        // Turret will move on track towards player 
+        // Will turn to face player
+        // then attack for a few seconds
+        // then repeat
+    */ 
+
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data;
+    gsai_bt(bt, { 
+        gsai_repeater(bt, { 
+            gsai_selector(bt, {
+
+                // Death sequence 
+                gsai_condition(bt, (data->hc->health <= 0.f), 
+                {
+                    gsai_sequence(bt, {
+                        gsai_leaf(bt, bsf_ai_task_fall_to_death);
+                    }); 
+                });
+
+
+                // Move/shoot sequence
+                gsai_condition(bt, (data->hc->health > 0.f), 
+                {
+                    gsai_sequence(bt, {
+                        gsai_leaf(bt, bsf_ai_task_shoot_at_player);
+                        gsai_wait(bt, &data->ac->wait, dt, 5.f);
+                    }); 
+                }); 
+
+            });
+        });
+    });
+}
+
+static void bsf_boss_bt(struct gs_ai_bt_t* bt)
+{
+    /* 
+        // Bandit will fly to random location within cone of player 
+        // then turn to face player
+        // then attack for a few seconds
+        // then repeat
+    */ 
+    const float dt = gs_platform_time()->delta; 
+    bsf_ai_data_t* data = (bsf_ai_data_t*)bt->ctx.user_data; 
+	bsf_t* bsf = gs_user_data(bsf_t);
+    
+    gsai_bt(bt, { 
+        gsai_repeater(bt, { 
+            gsai_selector(bt, {
+
+                // Death sequence 
+                gsai_condition(bt, (data->hc->health <= 0.f), {
+                    gsai_sequence(bt, {
+                        gsai_leaf(bt, bsf_ai_task_random_impulse);
+                        gsai_leaf(bt, bsf_ai_task_fall_to_death);
+                    });
+                });
+
+                // Move/shoot sequence
+                gsai_condition(bt, (data->hc->health > 0.f), { 
+                    gsai_sequence(bt, {
+
+                        gsai_leaf(bt, bsf_ai_task_find_rand_target_location);
+                        gsai_leaf(bt, bsf_ai_task_move_to_target_location);
+                        gsai_wait(bt, &data->ac->wait, dt, 0.3f);
+
+                        // Either spawn a bandit or shoot the player
+                        gsai_selector(bt, {
+
+                            // If pass random check, then spawn bandit
+                            gsai_condition(bt, gs_rand_gen_long(&bsf->run.rand) % 3 == 0, {
+                                gsai_leaf(bt, bsf_ai_task_spawn_bandit);
+                            });
+
+                            // Otherwise we shoot player
+                            gsai_leaf(bt, bsf_ai_task_shoot_at_player);
+                        });
+
+                        gsai_wait(bt, &data->ac->wait, dt, 0.2f);
+
+                    }); 
+                });
+            }); 
+        }); 
+    });
+}
+
 GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
 {
 	bsf_t* bsf = gs_user_data(bsf_t); 
@@ -1916,7 +2806,7 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
 	bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
     const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
     const float t = gs_platform_elapsed_time();
-    const float dt = gs_platform_delta_time(); 
+    const float dt = gs_platform_delta_time() * bsf->run.time_scale; 
     bsf_component_renderable_t* rca = ecs_term(it, bsf_component_renderable_t, 1);
     bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 2);
     bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 3); 
@@ -1945,7 +2835,8 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
             .tc = tc,
             .pc = pc,
             .hc = hc,
-            .ptc = ptc,
+            .mc = mc,
+            .ptc = ptc, 
             .ac = ai,
             .world = it->world,
             .mob = ent
@@ -1954,18 +2845,46 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
 
         switch (mc->type)
         {
-            default:
-            case BSF_MOB_BOX:
-            case BSF_MOB_SPHERE:
-            case BSF_MOB_CONE:
+            default: {
+            } break;
+
+            case BSF_MOB_TURRET:
             {
+                bsf_turret_bt(&ai->bt);
+
+                switch (room->movement_type)
+                {
+                    case BSF_MOVEMENT_RAIL:
+                    {
+                        // Move turret over time
+                        bsf_ai_data_t* data = &ai_data; 
+                        bsf_t* bsf = gs_user_data(bsf_t);
+                        const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
+                        const gs_platform_input_t* input = &gs_subsystem(platform)->input;
+                        const gs_platform_gamepad_t* gp = &input->gamepads[0];
+                        const float speed_mod = gp->axes[GS_PLATFORM_JOYSTICK_AXIS_RTRIGGER] >= 0.4f || gs_platform_key_down(GS_KEYCODE_LEFT_SHIFT) ? 35.f : 20.f;
+
+                        gs_vec3* pos = &data->tc->xform.translation;
+                        pos->z += dt * speed_mod;
+
+                        if (pos->z > BSF_ROOM_BOUND_Z) {
+                            pos->z = -BSF_ROOM_BOUND_Z;
+                        } 
+                    } break;
+                }
+
             } break;
 
             case BSF_MOB_BANDIT:
             { 
                 bsf_bandit_bt(&ai->bt);
             } break;
-        } 
+
+            case BSF_MOB_BOSS:
+            {
+                bsf_boss_bt(&ai->bt);
+            } break;
+        }
 
         // Do collision hit
         if (hc->hit)
@@ -1974,21 +2893,22 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
             gs_gfxt_material_set_uniform(hit_mat, "u_color", &(gs_vec3){1.f, 1.f, 1.f}); 
             bsf_renderable_t* rend = gs_slot_array_getp(bsf->scene.renderables, rc->hndl);
             rend->material = hit_mat;
+            gs_gfxt_material_t* mat = NULL;
 
             if (hc->hit_timer >= 0.1f) {
-                gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
+                switch (mc->type)
+                {
+                    case BSF_MOB_BANDIT: mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.bandit")); break;
+                    case BSF_MOB_TURRET: mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.turret")); break;
+                    case BSF_MOB_BOSS:   mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.brain")); break;
+                }
                 rend->material = mat;
                 hc->hit = false;
 				hc->hit_timer = 0.f;
             } 
 
-            // rc->color = GS_COLOR_RED; 
             hc->hit_timer += dt;
         }
-        else
-        {
-            // rc->color = GS_COLOR_WHITE;
-        } 
     }
 }
 
@@ -1996,9 +2916,23 @@ GS_API_DECL void bsf_mob_system(ecs_iter_t* it)
 
 GS_API_DECL void bsf_projectile_create(struct bsf_t* bsf, ecs_world_t* world, bsf_projectile_type type, bsf_owner_type owner, const gs_vqs* xform, gs_vec3 velocity)
 {
-    gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.laser_player"));
+	gs_gfxt_material_t* mat = NULL; 
     gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.laser_player"));
-    gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){0.f, 1.f, 0.f}); 
+
+	switch ( owner )
+	{
+		case BSF_OWNER_PLAYER:
+		{ 
+			mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.laser_player"));
+			gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){0.f, 1.f, 0.f}); 
+		} break;
+
+		case BSF_OWNER_ENEMY:
+		{
+			mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.laser_enemy"));
+			gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 0.f, 0.f}); 
+		} break;
+	}
 
     const float speed = gs_vec3_len(velocity);
 
@@ -2069,6 +3003,7 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
     bsf_t* bsf = gs_user_data(bsf_t); 
     const float t = gs_platform_elapsed_time();
     const float dt = gs_platform_delta_time() * bsf->run.time_scale;
+    const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
     bsf_component_renderable_t* rca = ecs_term(it, bsf_component_renderable_t, 1);
     bsf_component_transform_t* tca = ecs_term(it, bsf_component_transform_t, 2);
     bsf_component_physics_t* pca = ecs_term(it, bsf_component_physics_t, 3); 
@@ -2086,6 +3021,41 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
 		bsf_component_timer_t* kc = &kca[i];
 		bsf_component_projectile_t* bc = &bca[i];
 
+        switch (bc->owner)
+        {
+            case BSF_OWNER_PLAYER:
+            {
+                bsf_component_character_stats_t* psc = ecs_get(it->world, bsf->entities.player, bsf_component_character_stats_t);
+
+                if (
+                    (bc->type == BSF_PROJECTILE_BULLET && psc->projectile_opt & BSF_PROJECTILE_OPT_HOMING) || 
+                    (bc->type == BSF_PROJECTILE_BOMB && psc->projectile_opt & BSF_PROJECTILE_OPT_HOMING_BOMB)
+                )
+                {
+                    float dist = FLT_MAX;
+                    gs_vec3 vel = pc->velocity;
+                    for (uint32_t m = 0; m < gs_dyn_array_size(room->mobs); ++m)
+                    {
+                        bsf_component_transform_t* mtc = ecs_get(it->world, room->mobs[m], bsf_component_transform_t);
+                        float d2 = gs_vec3_dist2(mtc->xform.translation, tc->xform.translation);
+                        if (d2 < dist)
+                        { 
+                            dist = d2;
+                            vel = gs_vec3_sub(mtc->xform.translation, tc->xform.translation);
+                        }
+                    }
+                    
+                    pc->velocity = gs_vec3_norm(vel);
+
+                    gsi_defaults(&bsf->gs.gsi);
+                    gsi_depth_enabled(&bsf->gs.gsi, true);
+                    gsi_camera(&bsf->gs.gsi, &bsf->scene.camera.cam, (u32)fbs.x, (u32)fbs.y);
+                    gsi_line3Dv(&bsf->gs.gsi, tc->xform.translation, gs_vec3_add(tc->xform.translation, gs_vec3_scale(pc->velocity, 5.f)), GS_COLOR_BLUE);
+                } 
+
+            } break;
+        } 
+
         ecs_entity_t projectile = it->entities[i];
 		gs_vqs* xform = &tc->xform;
         gs_vec3* trans = &xform->position; 
@@ -2097,7 +3067,7 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
 
         // Update timer
         kc->time += dt;
-        if (kc->time >= kc->max) 
+        if (kc->time >= kc->max || trans->y <= 0.f) 
         {
             switch (bc->type)
             {
@@ -2109,7 +3079,9 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
                 case BSF_PROJECTILE_BOMB:
                 {
                     // Do bomb explosion
-                    bsf_explosion_create(bsf, it->world, &tc->xform, bc->owner);
+                    gs_vqs xform = tc->xform;
+                    xform.scale = gs_v3s(5.f);
+                    bsf_explosion_create(bsf, it->world, &xform, bc->owner);
                     ecs_delete(it->world, projectile);
 				} break;
             }
@@ -2139,10 +3111,32 @@ GS_API_DECL void bsf_projectile_system(ecs_iter_t* it)
 								h->health -= 1.f;
 								h->hit_timer = 0.f;
                                 bsf_camera_shake(bsf, &bsf->scene.camera, 0.1f);
+                                bsf_play_sound(bsf, "audio.bang", gs_rand_gen_range(&bsf->run.rand, 0.01f, 0.03f));
 								ecs_delete(it->world, projectile);
 								break;
 							} 
 						}
+
+						// Check against any items in scene
+						for (uint32_t ie = 0; ie < gs_dyn_array_size(room->items); ++ie)
+						{ 
+							ecs_entity_t item = room->items[ie];
+							bsf_component_transform_t* tform = ecs_get(bsf->entities.world, item, bsf_component_transform_t);
+							bsf_component_physics_t* phys = ecs_get(bsf->entities.world, item, bsf_component_physics_t); 
+							gs_contact_info_t res = bsf_component_physics_collide(pc, &tc->xform, phys, &tform->xform);
+
+							if (res.hit)
+							{ 
+								bsf_component_item_chest_t* cp = ecs_get(bsf->entities.world, item, bsf_component_item_chest_t);
+								cp->hit = true;
+								cp->hit_timer = 0.f;
+                                bsf_camera_shake(bsf, &bsf->scene.camera, 0.1f);
+                                bsf_play_sound(bsf, "audio.bang", gs_rand_gen_range(&bsf->run.rand, 0.01f, 0.03f));
+								ecs_delete(it->world, projectile);
+								break;
+							}
+						}
+
 					} break;
 
 					case BSF_OWNER_ENEMY:
@@ -2228,11 +3222,11 @@ GS_API_DECL void bsf_player_init(struct bsf_t* bsf)
 { 
     // This should all be initialized based on what the run context actually is
     gs_gfxt_material_t* mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.ship_arwing"));
-    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.ship"));
+    gs_gfxt_mesh_t* mesh = gs_hash_table_getp(bsf->assets.meshes, gs_hash_str64("mesh.arwing"));
     gs_gfxt_texture_t* tex = gs_hash_table_getp(bsf->assets.textures, gs_hash_str64("tex.arwing"));
     gs_gfxt_material_t* gsi_mat = gs_hash_table_getp(bsf->assets.materials, gs_hash_str64("mat.gsi"));
     gs_gfxt_material_set_uniform(mat, "u_tex", tex); 
-    gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 0.f, 0.f}); 
+    gs_gfxt_material_set_uniform(mat, "u_color", &(gs_vec3){1.f, 1.f, 1.f}); 
 
     bsf->entities.player = ecs_new(bsf->entities.world, 0); 
     ecs_entity_t p = bsf->entities.player;
@@ -2241,7 +3235,7 @@ GS_API_DECL void bsf_player_init(struct bsf_t* bsf)
         .xform = (gs_vqs){
             .translation = gs_v3(0.f, 5.f, 0.f),
             .rotation = gs_quat_default(),
-            .scale = gs_v3s(0.1f)
+            .scale = gs_v3s(0.08f)
         } 
     }); 
 
@@ -2253,9 +3247,12 @@ GS_API_DECL void bsf_player_init(struct bsf_t* bsf)
     ecs_set(bsf->entities.world, p, bsf_component_barrel_roll_t, {0});
 
     ecs_set(bsf->entities.world, p, bsf_component_character_stats_t, {
-        .speed = 10.f,
-        .fire_rate = 4.f,
-        .shot_speed = 1.4f
+        .health = 3.f,
+        .speed = 5.f,
+        .fire_rate = 1.4f,
+        .shot_speed = 1.2f,
+        .shot_count = 1,
+        .shot_size = 2.f,
     }); 
 
     ecs_set(bsf->entities.world, p, bsf_component_gun_t, {0});
@@ -2378,7 +3375,7 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
 
         // Update player position based on input
         const gs_vec2 xb = gs_v2(-10.f, 10.f);
-        const gs_vec2 yb = gs_v2(0.f, 8.f); 
+        const gs_vec2 yb = gs_v2(0.f, 9.f); 
         gs_vec3* ps = &tc->xform.position;
         gs_vec3 v = gs_v3s(0.f);
 
@@ -2746,23 +3743,39 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
         if (gc->firing && gc->time >= 30.f)
         { 
             gc->time = 0.f;
-            // Fire projectile using forward of player transform
-            gs_vec3 cam_forward = gs_vec3_scale(gs_vec3_norm(gs_camera_forward(&bsf->scene.camera.cam)), 100.f);
-            gs_vec3 vel_dir = gs_vec3_norm(gs_vec3_sub(cam_forward, tc->xform.translation));
-            gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f))); 
-            gs_vec3 up = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_YAXIS, 1.f))); 
-            gs_vec3 trans = gs_vec3_add(tc->xform.translation, gs_vec3_scale(forward, 0.1f));
-            gs_vqs xform = (gs_vqs){
-                .translation = trans, 
-                .rotation = tc->xform.rotation, 
-                .scale = gs_v3s(0.2f)
-            };
 
-            bsf_projectile_create(bsf, it->world, BSF_PROJECTILE_BULLET, BSF_OWNER_PLAYER, &xform, gs_vec3_scale(forward, psc->shot_speed * 5.f));
+            // Total shot size based on pc_count
+            float xsize = 0.5f; 
+
+            for (uint32_t s = 0; s < psc->shot_count; ++s)
+            {
+                float xoff = psc->shot_count > 1 ? gs_map_range(0.f, (float)psc->shot_count, -xsize * 0.5f, xsize, (float)s) : 0.f;
+
+                // Fire projectile using forward of player transform
+                gs_vec3 cam_forward = gs_vec3_scale(gs_vec3_norm(gs_camera_forward(&bsf->scene.camera.cam)), 100.f);
+                gs_vec3 vel_dir = gs_vec3_norm(gs_vec3_sub(cam_forward, tc->xform.translation));
+                gs_vec3 forward = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_ZAXIS, -1.f))); 
+                gs_vec3 right = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, GS_XAXIS)); 
+                gs_vec3 up = gs_vec3_norm(gs_quat_rotate(tc->xform.rotation, gs_vec3_scale(GS_YAXIS, 1.f))); 
+                gs_vec3 trans = gs_vec3_add(tc->xform.translation, gs_vec3_add(gs_vec3_scale(forward, 0.1f), gs_vec3_scale(right, xoff)));
+                gs_vqs xform = (gs_vqs){
+                    .translation = trans, 
+                    .rotation = tc->xform.rotation, 
+                    .scale = gs_v3s(0.2f * psc->shot_size)
+                };
+
+                float speed = psc->shot_speed * 5.f;
+                if (psc->projectile_opt & BSF_PROJECTILE_OPT_HOMING) speed *= 2.f;
+                bsf_projectile_create(bsf, it->world, BSF_PROJECTILE_BULLET, BSF_OWNER_PLAYER, &xform, gs_vec3_scale(forward, speed));
+            }
+
+            // Play sound 
+            bsf_play_sound(bsf, "audio.laser", 0.5f);
+
             bsf_camera_shake(bsf, &bsf->scene.camera, 0.05f);
         }
 
-        if (ic->bombs && gs_platform_mouse_pressed(GS_MOUSE_RBUTTON) || gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_B])
+        if (ic->bombs && (gs_platform_mouse_pressed(GS_MOUSE_RBUTTON) || gp->buttons[GS_PLATFORM_GAMEPAD_BUTTON_B]))
         {
             // Fire projectile using forward of player transform
             gs_vec3 cam_forward = gs_vec3_scale(gs_vec3_norm(gs_camera_forward(&bsf->scene.camera.cam)), 100.f);
@@ -2776,7 +3789,9 @@ GS_API_DECL void bsf_player_system(ecs_iter_t* it)
                 .scale = gs_v3s(0.2f)
             };
 
-            bsf_projectile_create(bsf, it->world, BSF_PROJECTILE_BOMB, BSF_OWNER_PLAYER, &xform, gs_vec3_scale(forward, psc->shot_speed * 5.f));
+            float speed = psc->shot_speed * 5.f;
+            if (psc->projectile_opt & BSF_PROJECTILE_OPT_HOMING_BOMB) speed *= 2.f;
+            bsf_projectile_create(bsf, it->world, BSF_PROJECTILE_BOMB, BSF_OWNER_PLAYER, &xform, gs_vec3_scale(forward, speed));
             ic->bombs = gs_max(ic->bombs - 1, 0);
         }
     } 
@@ -2792,22 +3807,98 @@ GS_API_DECL void bsf_player_damage(struct bsf_t* bsf, ecs_world_t* world, float 
     }
 }
 
-GS_API_DECL void bsf_player_item_pickup(struct bsf_t* bsf, ecs_world_t* world, bsf_item_type type)
+GS_API_DECL void bsf_player_consumable_pickup(struct bsf_t* bsf, ecs_world_t* world, bsf_consumable_type type)
 {
     switch (type)
     {
-        case BSF_ITEM_HEALTH:
+        case BSF_CONSUMABLE_HEALTH:
         {
             bsf_component_health_t* hc = ecs_get(world, bsf->entities.player, bsf_component_health_t);
-            hc->health += 0.5f;
+			bsf_component_character_stats_t* sc = ecs_get(world, bsf->entities.player, bsf_component_character_stats_t);
+            hc->health = gs_min(hc->health + 0.5f, sc->health);
+            bsf_play_sound(bsf, "audio.health_pickup", 0.5f);
         } break;
 
-        case BSF_ITEM_BOMB:
+        case BSF_CONSUMABLE_BOMB:
         {
             bsf_component_inventory_t* ic = ecs_get(world, bsf->entities.player, bsf_component_inventory_t);
-            ic->bombs++;
+            ic->bombs++; 
+            bsf_play_sound(bsf, "audio.bomb_pickup", 0.5f);
+        } break;
+    } 
+} 
+
+GS_API_DECL void bsf_player_item_pickup(struct bsf_t* bsf, ecs_world_t* world, bsf_item_type type)
+{
+    // Seach through current items, if not already picked up, grab
+    bsf_component_inventory_t* ic = ecs_get(world, bsf->entities.player, bsf_component_inventory_t);
+    bsf_component_character_stats_t* sc = ecs_get(world, bsf->entities.player, bsf_component_character_stats_t);
+    bsf_component_health_t* hc = ecs_get(world, bsf->entities.player, bsf_component_health_t); 
+
+    for (uint32_t i = 0; i < gs_dyn_array_size(ic->items); ++i)
+    {
+        if (ic->items[i] == type)
+        {
+            gs_println("Already have item!");
+            return;
+        }
+    }
+
+    gs_dyn_array_push(ic->items, type);
+
+    switch (type)
+    {
+		case BSF_ITEM_DEAD_ONION:
+		{ 
+            // Fire rate increases by 0.7
+            sc->shot_speed -= 0.4f;
+
+			// Shot size increased
+			sc->shot_size *= 1.5f;
+
+			gs_println("Picked up DEAD ONION");
+		} break;
+
+        case BSF_ITEM_SAD_ONION:       
+        {
+            // Fire rate increases by 0.7
+            sc->fire_rate += 0.7f;
+
+            gs_println("Picked up SAD ONION");
+
+        } break;
+
+        case BSF_ITEM_INNER_EYE:
+        {
+            // Fire decrease by 0.8
+            sc->fire_rate = gs_max(0.1f, sc->fire_rate - 0.8f);
+
+            // Triple shot
+            sc->shot_count = gs_max(3,  sc->shot_count);
+
+            gs_println("Picked up INNER EYE");
+
+        } break;
+
+        case BSF_ITEM_SPOON_BENDER:
+        {
+            sc->projectile_opt |= BSF_PROJECTILE_OPT_HOMING;
+
+            gs_println("Picked up SPOON BENDER");
+        } break;
+
+        case BSF_ITEM_MAGIC_MUSHROOM: 
+        {
+            sc->health += 1.f;
+            sc->damage *= 1.5f;
+            sc->speed += 0.3f;
+            hc->health = sc->health;
+            gs_println("Picked up MAGIC MUSHROOM");
         } break;
     }
+
+    // Take the item out of the available item pool 
+    bsf_item_remove_from_pool(bsf, type);
 } 
 
 //=== BSF Menus ===//
@@ -2857,6 +3948,7 @@ static void bsf_game_setup_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
             if (gs_gui_button_ex(gui, "Play", &(gs_gui_selector_desc_t){.classes = {"top_panel_item"}}, 0x00)) {
                 bsf->state = BSF_STATE_START;
                 bsf->run.is_playing = true;
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             } 
         }); 
 
@@ -2887,6 +3979,7 @@ static void bsf_options_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
             if (gs_gui_button_ex(gui, "Back", &(gs_gui_selector_desc_t){.classes ={"top_panel_item"}}, 0x00)) {
                 if (bsf->run.is_playing) bsf->state = BSF_STATE_PAUSE;
                 else                     bsf->state = BSF_STATE_MAIN_MENU;
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             } 
         });
     }
@@ -2918,6 +4011,7 @@ static void bsf_main_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
                 gs_uuid_t uuid = gs_platform_uuid_generate();
                 gs_platform_uuid_to_string(str, &uuid);
                 memcpy(bsf->run.seed, str, BSF_SEED_MAX_LEN - 1);
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             } 
         });
 
@@ -2925,6 +4019,7 @@ static void bsf_main_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
             if (gs_gui_button(gui, "Editor"))
             {
                 bsf->state = BSF_STATE_EDITOR_START;
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             }
         });
 
@@ -2932,20 +4027,24 @@ static void bsf_main_menu(struct bsf_t* bsf, const gs_gui_rect_t* parent)
             if (gs_gui_button(gui, "Options"))
             {
                 bsf->state = BSF_STATE_OPTIONS;
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             }
         });
 
+        /*
         BSF_GUI_ELEMENT_CENTERED({
             if (gs_gui_button(gui, "Test Suite"))
             {
                 bsf->state = BSF_STATE_TEST;
             }
         });
+        */
 
         BSF_GUI_ELEMENT_CENTERED({
             if (gs_gui_button(gui, "Quit"))
             {
                 bsf->state = BSF_STATE_QUIT; 
+                bsf_play_sound(bsf, "audio.menu_select", 0.5f);
             }
         });
     }
@@ -2987,6 +4086,7 @@ static void bsf_title_screen(struct bsf_t* bsf, const gs_gui_rect_t* parent)
             input->gamepads[0].buttons[GS_PLATFORM_GAMEPAD_BUTTON_START] || 
             input->gamepads[0].buttons[GS_PLATFORM_GAMEPAD_BUTTON_A]) {
             bsf->state = BSF_STATE_MAIN_MENU;
+            bsf_play_sound(bsf, "audio.start", 0.5f);
         }
     }
     gs_gui_panel_end(gui); 
@@ -3105,6 +4205,7 @@ GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
             if (gs_gui_button(gui, "Resume"))
             {
                 bsf->state = BSF_STATE_PLAY;
+                bsf_play_sound(bsf, "audio.start", 0.5f);
             } 
 
             if (gs_gui_button(gui, "Options"))
@@ -3115,6 +4216,7 @@ GS_API_DECL void bsf_menu_update(struct bsf_t* bsf)
             if (gs_gui_button(gui, "Exit"))
             {
                 bsf->state = BSF_STATE_END;
+                bsf_play_music(bsf, "audio.music_title");
             }
 
             gs_gui_window_end(gui);
@@ -3322,7 +4424,7 @@ static int32_t bsf_game_room_compare(void* cp0, void* cp1)
 
 GS_API_DECL void bsf_room_load(struct bsf_t* bsf, uint32_t cell)
 {
-    // Unload previous room cell of items and mobs
+    // Unload previous room cell of items, mobs, obstacles
     for (
         gs_slot_array_iter it = gs_slot_array_iter_new(bsf->run.rooms); 
         gs_slot_array_iter_valid(bsf->run.rooms, it);
@@ -3333,64 +4435,151 @@ GS_API_DECL void bsf_room_load(struct bsf_t* bsf, uint32_t cell)
         for (uint32_t i = 0; i < gs_dyn_array_size(room->mobs); ++i) {
             ecs_delete(bsf->entities.world, room->mobs[i]);
         }
+
+        for (uint32_t i = 0; i < gs_dyn_array_size(room->obstacles); ++i) {
+            ecs_delete(bsf->entities.world, room->obstacles[i]);
+        }
+
+        for (uint32_t i = 0; i < gs_dyn_array_size(room->consumables); ++i) {
+            ecs_delete(bsf->entities.world, room->consumables[i]);
+        }
+
+        for (uint32_t i = 0; i < gs_dyn_array_size(room->items); ++i) {
+            ecs_delete(bsf->entities.world, room->items[i]);
+        }
+
         gs_dyn_array_clear(room->mobs);
+        gs_dyn_array_clear(room->obstacles);
+        gs_dyn_array_clear(room->consumables);
+        gs_dyn_array_clear(room->items);
     }
+
+    gs_println("Loading room: %zu", cell);
 
     // Set new cell
     bsf->run.cell = cell;
 
     // Get new room to load
     bsf_room_t* room = gs_slot_array_iter_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.cell]);
+    ecs_world_t* world = bsf->entities.world;
 
     // Do not load room if already cleared
-    if (room->clear) {
+    if (room->cleared) {
         return; 
     }
 
-    room->movement_type = BSF_MOVEMENT_RAIL; 
+    room->movement_type = BSF_MOVEMENT_RAIL;
 
     switch (room->type)
     { 
         default: break; 
         case BSF_ROOM_START: break;
-        case BSF_ROOM_ITEM: break;
         case BSF_ROOM_SECRET: break;
         case BSF_ROOM_SHOP: break;
-        case BSF_ROOM_BOSS: break;
+
+        // Place item "chest" to be shot open by player
+        case BSF_ROOM_ITEM: 
+        {
+            // Generate new seeded rand for items
+            gs_mt_rand_t item_rand = gs_rand_seed(bsf->run.rand.mt[32] + bsf->run.cell); 
+
+            // Random item chest to be placed in front of player
+			gs_vqs xform = gs_vqs_default(); 
+			xform.translation = gs_v3(0.f, 4.f, -3.f);
+			xform.scale = gs_v3s(5.f);
+			bsf_item_type type = (bsf_item_type)gs_rand_gen_long(&item_rand) % BSF_ITEM_COUNT; 
+			ecs_entity_t e = bsf_item_chest_create(bsf, &xform, type);
+			gs_dyn_array_push(room->items, e);
+        } break;
+
+        case BSF_ROOM_BOSS: 
+        {
+            // Load up the only boss we got, hoss
+            bsf_mob_type type = BSF_MOB_BOSS;
+            gs_vqs xform = gs_vqs_default();
+            xform.translation.z = 10.f;
+            ecs_entity_t e = bsf_mob_create(bsf, world, &xform, type);
+            gs_dyn_array_push(room->mobs, e);
+            bsf->entities.boss = e;
+
+            // Play boss music
+            bsf_play_music(bsf, "audio.music_boss");
+        }break; 
 
         case BSF_ROOM_DEFAULT:
         { 
-            // Load a room template
-            gs_snprintfc(RT_FILE, 256, "%s/room_templates/room.rt", bsf->assets.asset_dir);
-            gs_byte_buffer_t buffer = gs_byte_buffer_new();
-            gs_byte_buffer_read_from_file(&buffer, RT_FILE);
-
             // Generate new seeded rand for items
-            gs_mt_rand_t item_rand = gs_rand_seed(bsf->run.rand.mt[32] + bsf->run.cell);
+            gs_mt_rand_t item_rand = gs_rand_seed(bsf->run.rand.mt[32] + bsf->run.cell); 
 
-            gs_byte_buffer_readc(&buffer, uint16_t, ct);
-            for (uint32_t i = 0; i < ct; ++i)
-            { 
-                gs_byte_buffer_readc(&buffer, bsf_room_brush_t, brush);
-                switch (brush.type)
-                {
+			uint32_t rs = gs_hash_table_size(bsf->assets.room_templates);
+			uint16_t v = (uint16_t)gs_rand_gen_long(&item_rand) % rs; 
+			gs_snprintfc(HASH_BUF, 256, "rt.r%zu", v);
+			gs_println("Loading room template: %s, rs: %zu", HASH_BUF, rs);
+			uint64_t hash = gs_hash_str64(HASH_BUF);
+
+			bsf_room_template_t* rt = gs_hash_table_getp(bsf->assets.room_templates, hash);
+			gs_assert(rt); 
+
+			for (
+				gs_slot_array_iter it = gs_slot_array_iter_new(rt->brushes);
+				gs_slot_array_iter_valid(rt->brushes, it);
+				gs_slot_array_iter_advance(rt->brushes, it)
+			)
+			{ 
+				bsf_room_brush_t* brush = gs_slot_array_iter_getp(rt->brushes, it);
+				switch (brush->type)
+				{
                     case BSF_ROOM_BRUSH_MOB: 
                     {
-                        bsf_mob_type type = BSF_MOB_BANDIT;
-                        ecs_entity_t e = bsf_mob_create(bsf, &brush.xform, type);
+                        // If it's a turret, then it stays on the floor and moves with the level
+                        uint64_t v = gs_rand_gen_long(&item_rand);
+                        bsf_mob_type type = v % (uint64_t)BSF_MOB_BOSS;
+                        ecs_entity_t e = bsf_mob_create(bsf, world, &brush->xform, type);
                         gs_dyn_array_push(room->mobs, e);
                     } break;
 
-                    case BSF_ROOM_BRUSH_ITEM:
+                    case BSF_ROOM_BRUSH_BANDIT: 
+                    {
+                        bsf_mob_type type = BSF_MOB_BANDIT;
+                        ecs_entity_t e = bsf_mob_create(bsf, world, &brush->xform, type);
+                        gs_dyn_array_push(room->mobs, e);
+                    } break;
+
+                    case BSF_ROOM_BRUSH_TURRET: 
+                    {
+                        // If it's a turret, then it stays on the floor and moves with the level
+                        bsf_mob_type type = BSF_MOB_TURRET;
+                        ecs_entity_t e = bsf_mob_create(bsf, world, &brush->xform, type);
+                        gs_dyn_array_push(room->mobs, e);
+                    } break;
+
+                    case BSF_ROOM_BRUSH_CONSUMABLE:
                     {
                         uint64_t v = gs_rand_gen_long(&item_rand);
-                        bsf_item_type type = v % (uint64_t)BSF_ITEM_COUNT;
-                        ecs_entity_t e = bsf_item_create(bsf, &brush.xform, type);
+                        bsf_consumable_type type = v % (uint64_t)BSF_CONSUMABLE_COUNT;
+                        ecs_entity_t e = bsf_consumable_create(bsf, &brush->xform, type);
+                        gs_dyn_array_push(room->consumables, e);
                     } break;
-                } 
-            } 
 
-            gs_byte_buffer_free(&buffer);
+                    case BSF_ROOM_BRUSH_OBSTACLE:
+                    {
+                        uint64_t v = gs_rand_gen_long(&item_rand);
+                        bsf_obstacle_type type = v % (uint64_t)BSF_OBSTACLE_COUNT; 
+						gs_vqs xform = brush->xform;
+
+                        // Get random scale 
+                        xform.scale = gs_v3( 
+                            gs_rand_gen_range(&item_rand, 1.f, 10.f), 
+                            gs_rand_gen_range(&item_rand, 1.f, 25.f), 
+                            gs_rand_gen_range(&item_rand, 1.f, 10.f)
+                        );
+                        xform.translation.z -= 1.5f * BSF_ROOM_BOUND_Z;
+
+                        ecs_entity_t e = bsf_obstacle_create(bsf, &xform, type);
+                        gs_dyn_array_push(room->obstacles, e);
+                    } break; 
+				}
+			} 
         } break; 
     }
 
@@ -3504,8 +4693,10 @@ static void bsf_game_level_gen(struct bsf_t* bsf)
     qsort(dead_ends, gs_dyn_array_size(dead_ends), sizeof(uint16_t), bsf_game_room_compare); 
 
 	// Assign boss room (use manhattan distance to determine farthest room from start)
-	room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[gs_dyn_array_back(dead_ends)]);
-	room->type = BSF_ROOM_BOSS; 
+    uint32_t boss = gs_dyn_array_back(dead_ends);
+    bsf->run.boss = boss;
+	room = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[boss]);
+	room->type = BSF_ROOM_BOSS;
 
     // Pop off end 
     gs_dyn_array_pop(dead_ends);
@@ -3541,7 +4732,8 @@ static void bsf_game_level_gen(struct bsf_t* bsf)
                 )
                 {
                     // Insert new room
-                    bsf->run.room_ids[cell] = gs_slot_array_insert(bsf->run.rooms, (bsf_room_t){.type = BSF_ROOM_SECRET});
+                    bsf_room_t room = (bsf_room_t){.type = BSF_ROOM_SECRET, .cell = (uint16_t)cell};
+                    bsf->run.room_ids[cell] = gs_slot_array_insert(bsf->run.rooms, room);
                     found = true; 
                     break;
                 } 
@@ -3562,6 +4754,18 @@ static void bsf_game_level_gen(struct bsf_t* bsf)
 
     // For each room, generate mobs (this will be based on templates) 
     bsf_room_load(bsf, start_room);
+
+    // For each room, set room cell
+    for (uint32_t i = 0; i < BSF_ROOM_MAX; ++i)
+    { 
+        uint16_t cell = (uint16_t)i;
+        int16_t id = bsf->run.room_ids[cell];
+        if (id != -1) 
+        {
+            bsf_room_t* room = gs_slot_array_getp(bsf->run.rooms, id);
+            room->cell = cell;
+        }
+    } 
 
     gs_dyn_array_free(queue);
     gs_dyn_array_free(dead_ends);
@@ -3610,6 +4814,9 @@ GS_API_DECL void bsf_game_start(struct bsf_t* bsf)
 
     // Set state to playing game
     bsf->state = BSF_STATE_PLAY;
+
+    // Start level music
+    bsf_play_music(bsf, "audio.music_level");
 }
 
 GS_API_DECL void bsf_game_end(struct bsf_t* bsf)
@@ -3619,6 +4826,43 @@ GS_API_DECL void bsf_game_end(struct bsf_t* bsf)
 
     bsf->run.is_playing = false;
     bsf->state = BSF_STATE_MAIN_MENU;
+}
+
+GS_API_DECL void bsf_play_music(struct bsf_t* bsf, const char* key)
+{
+    uint64_t hash = gs_hash_str64(key);
+    gs_asset_audio_t* src = gs_hash_table_getp(bsf->assets.sounds, hash);
+    gs_assert(src);
+    gs_audio_stop(bsf->music);
+    if (!gs_handle_is_valid(bsf->music)) {
+        gs_println("CREATING INSTANCE DATA");
+        bsf->music = gs_audio_instance_create(&(gs_audio_instance_decl_t) {
+            .src = src->hndl, 
+            .volume = 0.7f, 
+            .loop = true, 
+            .persistent = false
+        });
+    }
+    else
+    {
+        gs_println("SETTING INSTANCE DATA");
+        gs_audio_set_instance_data(bsf->music, (gs_audio_instance_decl_t) {
+            .src = src->hndl, 
+            .volume = 0.7f, 
+            .loop = true,
+            .persistent = false,
+            .sample_position = 0
+        });
+    }
+    gs_audio_play(bsf->music);
+}
+
+GS_API_DECL void bsf_play_sound(struct bsf_t* bsf, const char* key, float volume)
+{
+    uint64_t hash = gs_hash_str64(key);
+    gs_asset_audio_t* src = gs_hash_table_getp(bsf->assets.sounds, hash);
+    gs_assert(src);
+    gs_audio_play_source(src->hndl, volume);
 }
 
 typedef struct
@@ -3679,11 +4923,11 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
     {
         // Lock mouse at start by default
         gs_platform_lock_mouse(gs_platform_main_window(), false);
-    }
-
+    } 
 
     if (gs_platform_key_pressed(GS_KEYCODE_ESC)) {
         bsf->state = BSF_STATE_PAUSE;
+        bsf_play_sound(bsf, "audio.pause", 0.5f);
         return;
     } 
 
@@ -3692,8 +4936,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
         if (bsf->dbg) {
             bsf_camera_init(bsf, &bsf->scene.camera);
         }
-    }
-
+    } 
 
     if (bsf->dbg)
     {
@@ -3708,28 +4951,86 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
         bsf_camera_update(bsf, &bsf->scene.camera);
     } 
 
+    if (bsf->run.time_scale < 1.f)
+    {
+        bsf->run.time_scale = gs_interp_smoothstep(bsf->run.time_scale, 1.f, 0.1f);
+    }
+
     // Update entity world
     ecs_progress(bsf->entities.world, 0);
 
     // If all mobs cleared from room, then clear it
     static bool just_cleared_room = false;
+    static bool just_cleared_level = false;
+    static bool complete = false;
     static float clear_timer = 0.f;
-    const float time_max = 5.f;
-    if (gs_dyn_array_empty(room->mobs) || gs_platform_key_pressed(GS_KEYCODE_C))
+    const float time_max = 1.f;
+    if (
+		!complete && 
+		gs_dyn_array_empty(room->mobs) && 
+		gs_dyn_array_empty(room->items)
+	)
     {
-        room->clear = true;
+        room->cleared = true;
 
         if (!just_cleared_room)
         {
             just_cleared_room = true;
             clear_timer = time_max;
         } 
+
+        // If all obstacles are cleared as well, then move on
+        if (
+            gs_dyn_array_empty(room->obstacles) && 
+            gs_dyn_array_empty(room->consumables) && 
+            just_cleared_room && clear_timer <= 0.f
+        )
+        {
+            // Iterate through rooms, find first "non-cleared" one 
+            bool loaded = false;
+            for (
+                    gs_slot_array_iter it = gs_slot_array_iter_new(bsf->run.rooms);
+                    gs_slot_array_iter_valid(bsf->run.rooms, it);
+                    gs_slot_array_iter_advance(bsf->run.rooms, it)
+                )
+            {
+                bsf_room_t* room = gs_slot_array_iter_getp(bsf->run.rooms, it);
+                if (!room->cleared && room->type != BSF_ROOM_BOSS)
+                {
+                    bsf_room_load(bsf, room->cell);
+                    loaded = true;
+                    break;
+                }
+            }
+
+            // Boss time!
+            if (!loaded)
+            {
+                // Check to see if boss room is cleared or not
+                bsf_room_t* br = gs_slot_array_getp(bsf->run.rooms, bsf->run.room_ids[bsf->run.boss]);
+                if (!br->cleared) {
+                    bsf_room_load(bsf, bsf->run.boss);
+                }
+                else {
+                    just_cleared_level = true;
+                }
+            }
+        }
     }
     else
     {
         just_cleared_room = false;
         clear_timer = 0.f;
+    } 
+
+    if (just_cleared_level)
+    {
+        just_cleared_level = false;
+        complete = true;
+        bsf_play_music(bsf, "audio.music_level_complete");
     }
+
+    // If not in a boss room, we need to have obstacles that scroll by...depending on the room type
 
     // UI 
 	int32_t opt = GS_GUI_OPT_NOBRINGTOFRONT |
@@ -3756,7 +5057,33 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, 350, 30, 10, 0, GS_GUI_LAYOUT_ANCHOR_TOPLEFT);
             gs_gui_layout_set_next(gui, anchor, 0); 
             gs_gui_layout_row(gui, 1, (int16_t[]){-1}, 0); 
-            gs_gui_label(gui, "bombs: %zu, health: %.2f, fps: %.2f", ic->bombs, hc->health, frame); 
+            gs_gui_label(gui, "bombs: %zu, health: %.2f, ts: %.2f, fps: %.2f", ic->bombs, hc->health, bsf->run.time_scale, frame); 
+        }
+
+        // Boss health
+        {
+            if (room->type == BSF_ROOM_BOSS && bsf->entities.boss != UINT_MAX)
+            {
+                gs_gui_rect_t anchor = gs_gui_layout_anchor(&cnt->body, 32, cnt->body.h * 0.8f, 10, 50, GS_GUI_LAYOUT_ANCHOR_TOPLEFT);
+                gs_gui_layout_set_next(gui, anchor, 0);
+                bsf_component_health_t* bhc = ecs_get(bsf->entities.world, bsf->entities.boss, bsf_component_health_t); 
+                gs_color_t c0 = GS_COLOR_RED; 
+                gs_color_t c1 = GS_COLOR_GREEN; 
+                const float ct = gs_map_range(0.f, 100.f, 0.f, 1.f, bhc->health);
+                gs_color_t color = gs_color(
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.r / 255.f, (float)c1.r / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.g / 255.f, (float)c1.g / 255.f, ct)), 
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.b / 255.f, (float)c1.b / 255.f, ct)),
+                    (uint8_t)(255.f * gs_interp_smoothstep((float)c0.a / 255.f, (float)c1.a / 255.f, ct))
+                );
+
+                gs_gui_draw_rect(gui, anchor, GS_COLOR_BLACK);
+                float y = gs_map_range(100.f, 0.f, anchor.y, anchor.y + anchor.h, bhc->health); 
+                float diff = y - anchor.y;
+                anchor.y = y;
+                anchor.h -= diff; 
+                gs_gui_draw_rect(gui, anchor, color);
+            }
         }
 
         // Clear message
@@ -3769,6 +5096,8 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
             gs_gui_layout_row(gui, 1, (int16_t[]){-1}, 0);
             gs_gui_label(gui, "ROOM CLEARED");
             clear_timer -= dt;
+
+            // On clearing a room, need to select next in list
         }
 
         // Aim reticles
@@ -3835,12 +5164,14 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                     case BSF_OWNER_ENEMY:
                     {
                         const bsf_component_transform_t* tc = ecs_get(bsf->entities.world, b, bsf_component_transform_t);
+                        const bsf_component_physics_t* pc = ecs_get(bsf->entities.world, b, bsf_component_physics_t);
                         gs_vec3 bp = tc->xform.translation; 
+                        gs_vec3 vel = pc->velocity;
 
                         gs_vec3 dir = gs_vec3_norm(gs_vec3_sub(bp, bsf->scene.camera.cam.transform.translation));
                         gs_vec3 fwd = gs_vec3_norm(gs_camera_forward(&bsf->scene.camera.cam));
 
-                        if (gs_vec3_dot(dir, fwd) >= 0.f)
+                        if (gs_vec3_dot(dir, fwd) >= 0.f && gs_vec3_dot(vel, fwd) < 0.f)
                         { 
                             gs_vec3 coords = gs_camera_world_to_screen(&bsf->scene.camera.cam, bp, fbs.x, fbs.y); 
 
@@ -3939,7 +5270,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                         gs_rand_gen_range(&bsf->run.rand, -20.f, 20.f),
                         gs_rand_gen_range(&bsf->run.rand, -20.f, 20.f)
                     );
-                    ecs_entity_t e = bsf_mob_create(bsf, &xform, type);
+                    ecs_entity_t e = bsf_mob_create(bsf, bsf->entities.world, &xform, type);
                     gs_dyn_array_push(room->mobs, e);
                 }
 
@@ -3948,6 +5279,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                 GUI_LABEL("num_mobs: %zu", (u32)gs_dyn_array_size(room->mobs));
                 GUI_LABEL("num_renderables: %zu", gs_slot_array_size(bsf->scene.renderables));
                 GUI_LABEL("active cell: %zu", bsf->run.cell);
+                GUI_LABEL("room cell: %zu", room->cell);
 
                 gs_gui_layout_row(gui, 2, (int[]){150, -1}, 0); 
 
@@ -4024,6 +5356,9 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
                 gs_gui_label(gui, "shot_speed: " );
                 gs_gui_number(gui, &psc->shot_speed, 0.1f); 
 
+                gs_gui_label(gui, "shot_size: " );
+                gs_gui_number(gui, &psc->shot_size, 0.1f); 
+
                 gs_gui_treenode_end(gui);
             }
         }
@@ -4036,6 +5371,7 @@ GS_API_DECL void bsf_game_update(struct bsf_t* bsf)
 #define SENSITIVITY  0.2f
 static gs_vqs gxform = {0};
 static bsf_room_template_t room_template = {0}; 
+static bsf_room_template_t* rt = NULL;
 static uint32_t brush = 0;
 static bool editor_init = false;
 static rt_file[256] = {0};
@@ -4048,34 +5384,20 @@ GS_API_DECL void bsf_editor_start(struct bsf_t* bsf)
 
     bsf->state = BSF_STATE_EDITOR; 
 
-    gs_slot_array_clear(room_template.brushes); 
-
-    // Try to load room template from file
-    gs_snprintfc(TMP, 256, "%s/room_templates/room.rt", bsf->assets.asset_dir);
-    memcpy(rt_file, TMP, 256);
-
-    if (gs_platform_file_exists(rt_file))
+    if (!rt)
     {
-        gs_byte_buffer_t buffer = gs_byte_buffer_new();
-        gs_byte_buffer_read_from_file(&buffer, rt_file); 
-        gs_byte_buffer_readc(&buffer, uint16_t, ct); 
-        for (uint32_t i = 0; i < ct; ++i)
-        {
-            gs_byte_buffer_readc(&buffer, bsf_room_brush_t, br);
-            gs_slot_array_insert(room_template.brushes, br);
-        }
-        gs_byte_buffer_free(&buffer);
-    }
+        rt = gs_hash_table_getp(bsf->assets.room_templates, gs_hash_str64("rt.r0")); 
+    } 
 
     brush = UINT_MAX;
 
     if (!editor_init)
     {
         editor_init = true;
-        gs_gui_dock_ex(gui, "Scene", "Dockspace", GS_GUI_SPLIT_BOTTOM, 1.f);
-        gs_gui_dock_ex(gui, "Outliner", "Scene", GS_GUI_SPLIT_RIGHT, 0.3f); 
-        gs_gui_dock_ex(gui, "Properties", "Outliner", GS_GUI_SPLIT_BOTTOM, 0.7f); 
-        gs_gui_dock_ex(gui, "Debug", "Properties", GS_GUI_SPLIT_BOTTOM, 0.5f);
+        gs_gui_dock_ex(gui, "Scene##editor", "Dockspace##editor", GS_GUI_SPLIT_BOTTOM, 1.f);
+        gs_gui_dock_ex(gui, "Outliner##editor", "Scene##editor", GS_GUI_SPLIT_RIGHT, 0.3f); 
+        gs_gui_dock_ex(gui, "Properties##editor", "Outliner##editor", GS_GUI_SPLIT_BOTTOM, 0.7f); 
+        gs_gui_dock_ex(gui, "Debug##editor", "Properties##editor", GS_GUI_SPLIT_BOTTOM, 0.5f);
     }
 
     // Set default style sheet
@@ -4089,7 +5411,7 @@ GS_API_DECL void bsf_editor_scene_cb(gs_gui_context_t* ctx, gs_gui_customcommand
     const float t = gs_platform_elapsed_time(); 
 	const gs_gui_rect_t vp = cmd->viewport;
 	const gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window());
-    const bsf_room_template_t* rt = &room_template;
+    // const bsf_room_template_t* rt = &room_template;
 
     // Draw room
 	gsi_defaults(gsi);
@@ -4134,8 +5456,11 @@ GS_API_DECL void bsf_editor_scene_cb(gs_gui_context_t* ctx, gs_gui_customcommand
             switch (br->type)
             {
                 case BSF_ROOM_BRUSH_MOB: col   = GS_COLOR_RED; break;
+                case BSF_ROOM_BRUSH_BANDIT: col   = GS_COLOR_RED; break;
+                case BSF_ROOM_BRUSH_TURRET: col   = GS_COLOR_RED; break;
                 case BSF_ROOM_BRUSH_PROP: col  = GS_COLOR_WHITE; break;
-                case BSF_ROOM_BRUSH_ITEM: col  = GS_COLOR_ORANGE; break;
+                case BSF_ROOM_BRUSH_CONSUMABLE: col  = GS_COLOR_ORANGE; break;
+                case BSF_ROOM_BRUSH_OBSTACLE: col  = GS_COLOR_WHITE; break;
             }
 
             // Depending on type, do various shapes
@@ -4143,17 +5468,14 @@ GS_API_DECL void bsf_editor_scene_cb(gs_gui_context_t* ctx, gs_gui_customcommand
         }
         gsi_pop_matrix(gsi);
     } 
-}
 
-GS_API_DECL int32_t gs_gui_selectable(gs_gui_context_t* ctx, const char* label, bool* selected)
-{
-    int32_t res = 0;
-    int32_t opt = GS_GUI_OPT_NOMOVE | 
-                  GS_GUI_OPT_NORESIZE | 
-                  GS_GUI_OPT_NOTITLE | 
-                  GS_GUI_OPT_FORCESETRECT;
+    // Draw player position
+    gsi_box(gsi, 0.f, 0.f, 0.f, 0.5f, 0.5f, 0.5, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
 
-    return res;
+    // Draw visible rail box
+    // Debug bounding area
+    gs_vec3 kb = {BSF_ROOM_BOUND_X, BSF_ROOM_BOUND_Y, BSF_ROOM_BOUND_Z}; 
+    gsi_box(gsi, 0.f, kb.y / 2.f, 0.f, kb.x + 1.f, kb.y / 2.f, kb.z + 1.f, 0, 255, 0, 255, GS_GRAPHICS_PRIMITIVE_LINES);
 }
 
 GS_API_DECL int32_t gs_gui_combo(gs_gui_context_t* ctx, const char* label, int32_t* current_item, const char* items[], int32_t items_count, 
@@ -4196,7 +5518,6 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
     gs_command_buffer_t* cb = &bsf->gs.cb;
     gs_immediate_draw_t* gsi = &bsf->gs.gsi;
     gs_gui_context_t* gui = &bsf->gs.gui;
-    bsf_room_template_t* rt = &room_template; 
 
 	gs_vec2 fbs = gs_platform_framebuffer_sizev(gs_platform_main_window()); 
 	const float t = gs_platform_elapsed_time() * 0.001f;
@@ -4235,16 +5556,15 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
         GS_GUI_OPT_NOFOCUS | 
         GS_GUI_OPT_NORESIZE;
 
-    gs_gui_window_begin_ex(gui, "Dockspace", gs_gui_rect(350, 40, 600, 500), NULL, NULL, opt);
+    gs_gui_window_begin_ex(gui, "Dockspace##editor", gs_gui_rect(350, 40, 600, 500), NULL, NULL, opt);
     {
         // Empty dockspace...
     }
     gs_gui_window_end(gui);
 
-	gs_gui_window_begin_ex(gui, "Outliner", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
+	gs_gui_window_begin_ex(gui, "Outliner##editor", gs_gui_rect(350, 40, 300, 200), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
-        gs_gui_panel_begin_ex(gui, "#panel", NULL, GS_GUI_OPT_NOTITLE | GS_GUI_OPT_NOSCROLLHORIZONTAL);
         {
             gs_gui_layout_row(gui, 2, (int[]){10, -1}, 0); 
             bool quit = false;
@@ -4269,14 +5589,13 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
                 }
             }
         }
-        gs_gui_panel_end(gui);
     }
 	gs_gui_window_end(gui);
 
-	gs_gui_window_begin_ex(gui, "Properties", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
+	gs_gui_window_begin_ex(gui, "Properties##editor", gs_gui_rect(0, 0, 300, 200), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
-        if (!brush)
+        if (brush == UINT_MAX)
         {
             gs_gui_label(gui, "No brush selected...");
         }
@@ -4289,8 +5608,11 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
             const char* types[] = {
                 "Invalid", 
                 "Mob", 
-                "Item",
-                "Prop"
+                "Consumable",
+                "Prop",
+                "Obstacle",
+                "Bandit", 
+                "Turret"
             };
             const ct = sizeof(types) / sizeof(const char*);
             gs_gui_layout_row(gui, 2, (int[]){100.f, -10}, 0); 
@@ -4331,7 +5653,7 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
     }
 	gs_gui_window_end(gui);
 
-	gs_gui_window_begin_ex(gui, "Debug", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
+	gs_gui_window_begin_ex(gui, "Debug##editor", gs_gui_rect(0, 0, 300.f, 200.f), NULL, NULL, GS_GUI_OPT_NOSCROLLHORIZONTAL);
     {
         gs_gui_layout_row(gui, 1, (int[]){-1}, 0); 
 
@@ -4348,6 +5670,16 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
                 case 0: bsf->scene.camera.cam.proj_type = GS_PROJECTION_TYPE_ORTHOGRAPHIC; break;
                 case 1: bsf->scene.camera.cam.proj_type = GS_PROJECTION_TYPE_PERSPECTIVE; break;
             }
+        }
+
+        // Duplicate brush
+        if (brush != UINT32_MAX && gs_platform_key_down(GS_KEYCODE_LCTRL) && gs_platform_key_pressed(GS_KEYCODE_D))
+        {
+            bsf_room_brush_t* bp = gs_slot_array_getp(rt->brushes, brush);
+            bsf_room_brush_t br = {0};
+            br.type = bp->type;
+            br.xform = bp->xform;
+            brush = gs_slot_array_insert(rt->brushes, br);
         }
 
         if (gs_gui_button(gui, "Brush Create"))
@@ -4372,7 +5704,29 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
 
             gs_snprintf(TMP, sizeof(TMP), "hover_root: %zu", gui->hover_root ? gui->hover_root->name : "NULL");
             gs_gui_label(gui, TMP);
-        }
+        } 
+
+        if (gs_gui_combo_begin_ex(gui, "##load_rt", rt->path, 5, NULL, 0x00))
+        {
+            gs_gui_layout_row(gui, 1, (int[]){-1}, 0); 
+            for (
+                gs_hash_table_iter it = gs_hash_table_iter_new(bsf->assets.room_templates); 
+                gs_hash_table_iter_valid(bsf->assets.room_templates, it);
+                gs_hash_table_iter_advance(bsf->assets.room_templates, it)
+            )
+            { 
+                bsf_room_template_t* rtp = gs_hash_table_iter_getp(bsf->assets.room_templates, it);
+                gs_snprintfc(TMP, 256, "%s##rt%zu", rtp->path, it);
+                if (gs_gui_button(gui, TMP))
+                {
+                    rt = rtp;
+					brush = UINT_MAX;
+                    break;
+                }
+            } 
+
+            gs_gui_combo_end(gui);
+        } 
 
         // Save and sheeeiiiiit
         if (gs_gui_button(gui, "Save"))
@@ -4393,18 +5747,20 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
                 bsf_room_brush_t* br = gs_slot_array_iter_getp(rt->brushes, it);
                 gs_byte_buffer_write(&buffer, bsf_room_brush_t, *br);
             } 
-            gs_byte_buffer_write_to_file(&buffer, rt_file);
+            gs_snprintf(TMP, 256, "%s/%s", bsf->assets.asset_dir, rt->path);
+            gs_byte_buffer_write_to_file(&buffer, TMP);
             gs_byte_buffer_free(&buffer);
         }
 
         if (gs_gui_button(gui, "Exit"))
         {
             bsf->state = BSF_STATE_MAIN_MENU;
+            bsf_play_music(bsf, "audio.music_title");
         }
     }
 	gs_gui_window_end(gui);
 
-	gs_gui_window_begin_ex(gui, "Scene", gs_gui_rect(0, 0, 500.f, 400.f), NULL, NULL, 0x00);
+	gs_gui_window_begin_ex(gui, "Scene##editor", gs_gui_rect(0, 0, 500.f, 400.f), NULL, NULL, 0x00);
 	{ 
         gs_gui_layout_t* layout = gs_gui_get_layout(gui);
         gs_gui_layout_row(gui, 1, (int[]){-1}, -1); 
@@ -4486,7 +5842,7 @@ GS_API_DECL void bsf_editor(struct bsf_t* bsf)
             gs_gui_layout_set_next(gui, rect, 0);
 
             gs_gui_layout_row(gui, 1, (int[]){-1}, 0);
-            gs_snprintfc(TMP, 512, "template: %s", rt_file);
+            gs_snprintfc(TMP, 512, "template: %s", rt->path);
             gs_gui_label(gui, TMP);
         }
         
@@ -5036,6 +6392,7 @@ GS_API_DECL void bsf_test(struct bsf_t* bsf)
         {
             bsf->state = BSF_STATE_MAIN_MENU;
             bsf_test_init = false; 
+            bsf_play_music(bsf, "audio.music_title");
         } 
 
 		// Curve parameters

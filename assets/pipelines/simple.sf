@@ -2,7 +2,7 @@ pipeline {
 
     raster 
     { 
-        primitive: LINES
+        primitive: TRIANGLES
         index_buffer_element_size: UINT32
     },
 
@@ -18,6 +18,7 @@ pipeline {
             attributes { 
 
                 POSITION : a_position
+                NORMAL   : a_normal
                 TEXCOORD : a_uv         
                 COLOR    : a_color      
             }, 
@@ -51,9 +52,9 @@ pipeline {
                 vec4 frag_color;            
             },
 
-            code {
+            code { 
                 void main() {
-                    frag_color = vec4(u_color, 1.0); //texture(u_tex, uv);
+                    frag_color = vec4(u_color, 1.0) * texture(u_tex, uv);
                 }
             }
         } 

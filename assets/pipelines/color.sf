@@ -4,7 +4,7 @@ pipeline {
 
     raster 
     { 
-        primitive: LINES
+        primitive: TRIANGLES
         index_buffer_element_size: UINT32
     },
 
@@ -18,7 +18,6 @@ pipeline {
         vertex { 
 
             attributes { 
-
                 POSITION : a_position
             }, 
 
