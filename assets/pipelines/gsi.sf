@@ -25,7 +25,8 @@ pipeline {
         vertex { 
 
             attributes { 
-                POSITION : a_position
+                POSITION : a_position, 
+                TEXCOORD : a_uv,
                 COLOR: a_color
             }, 
 
@@ -36,6 +37,7 @@ pipeline {
             out {
                 vec3 vposition;
                 vec4 vcolor;
+                vec2 vuv;
             },
 
             code { 
@@ -43,11 +45,16 @@ pipeline {
                     gl_Position = u_mvp * vec4(a_position, 1.0);
                     vposition = a_position;
                     vcolor = a_color;
+                    vuv = vec2(a_uv.x, -a_uv.y); 
                 }
             }
         },
 
         fragment { 
+
+            uniforms {
+                sampler2D u_tex;
+            }
             
             out {
                 vec4 frag_color;            
@@ -55,7 +62,7 @@ pipeline {
 
             code {
                 void main() {
-                    frag_color = vcolor;
+                    frag_color = texture(u_tex, vuv) * vcolor;
                 }
             }
         } 
